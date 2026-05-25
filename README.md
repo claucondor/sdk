@@ -2,8 +2,30 @@
 
 Unified TypeScript SDK for OpenJanus privacy primitives on Flow.
 
-Consolidates @openjanus/babyjub, @openjanus/pedersen, @openjanus/groth16,
-and @openjanus/janus-token into a single, extensible package.
+Consolidates @openjanus/babyjub, @openjanus/pedersen, and @openjanus/groth16
+into a single, extensible package. Provides the cryptographic foundation for
+the v2 ElGamal-on-BabyJub confidential token stack.
+
+---
+
+## Versioning
+
+| Version | Status | Description |
+|---------|--------|-------------|
+| `^0.2.0` | **Current** | Primitives only. v1 token layer removed. Cryptographic foundation for v2 (ElGamal-on-BabyJub) stack. |
+| `^0.1.0` | **Legacy (deprecated)** | v1 stack: Pedersen-hash based JanusToken/JanusFlow. Has known privacy limitation. Do not use for new apps. |
+
+### Why v1 was deprecated
+
+v1 used circomlib's Pedersen hash for balance commitments. While cryptographically binding and
+hiding, this hash is not additively homomorphic in the value domain, and the Cadence cross-VM
+wrap layer leaked plaintext amounts via standard `TokensWithdrawn` events. In multi-sender
+scenarios, recipients could recover per-sender amounts — defeating the privacy goal.
+
+v2 replaces this with ElGamal-on-BabyJub encryption (in [openjanus/contracts](https://github.com/openjanus/contracts)),
+which is additively homomorphic and does not require per-sender amount knowledge to decrypt.
+
+Full explanation: [docs/why-v1-was-deprecated.md](docs/why-v1-was-deprecated.md)
 
 ---
 
@@ -22,19 +44,6 @@ Dependencies (installed automatically):
 ---
 
 ## Quick start
-
-### Read a JanusToken balance
-
-```typescript
-import { JanusToken, JANUS_TOKEN_TESTNET } from "@openjanus/sdk";
-
-const token = new JanusToken(JANUS_TOKEN_TESTNET);
-await token.connect();
-
-const commit = await token.balanceOfCommitment("0xAliceAddress");
-// identity (0, 1) means zero balance
-console.log(commit); // { x: 0n, y: 1n }
-```
 
 ### Compute a Pedersen commitment
 
@@ -69,62 +78,22 @@ console.log(proofResult.locallyVerified); // true
 // proofResult.proof and proofResult.publicInputs are ready for on-chain submission
 ```
 
-### JanusFlow wrap + transfer (Cadence)
-
-```typescript
-import { JanusFlow } from "@openjanus/sdk";
-
-const sdk = new JanusFlow({ network: "testnet" });
-await sdk.configure();
-
-// Wrap 10 FLOW
-const { txId: wrapTx, commitment } = await sdk.wrap(
-  "10.0",
-  10n,
-  aliceBlinding,
-  aliceAuthz  // FCL authorization function
-);
-console.log("Wrap TX:", wrapTx);
-
-// Transfer 3 FLOW to Bob
-const { txId: transferTx } = await sdk.confidentialTransfer(
-  BOB_CADENCE_ADDRESS,
-  {
-    oldBalance: 10n,
-    oldBlinding: aliceBlinding,
-    transferAmount: 3n,
-    transferBlinding: generateBlinding(),
-    newBlinding: generateBlinding(),
-    wasmPath,
-    zkeyPath,
-  },
-  aliceAuthz
-);
-console.log("Transfer TX:", transferTx);
-```
-
 ---
 
 ## Module structure
 
 ```
 @openjanus/sdk
-├── tokens/      JanusToken (EVM NATIVE), JanusFlow (Cadence WRAPPER)
 ├── crypto/      computeCommitment, buildTransferProof, generateBlinding
 ├── primitives/  BabyJub, Pedersen, Groth16 (low-level)
 ├── network/     createEvmWallet, createEvmProvider, COA helpers
 └── utils/       hex conversion, pi_b swap
 ```
 
+> The v1 `tokens/` module (JanusToken, JanusFlow) was removed in 0.2.0.
+> v2 token contracts live in [openjanus/contracts](https://github.com/openjanus/contracts).
+
 ---
-
-## Examples
-
-```bash
-# Print commitment math and SDK API usage (no network required)
-npx ts-node --esm examples/basic-transfer.ts
-npx ts-node --esm examples/multi-wrap.ts
-```
 
 ---
 
@@ -145,12 +114,23 @@ npm run test:all
 
 ## Deployed contracts (testnet)
 
+### Primitive contracts (canonical, used by both v1 and v2)
+
 | Contract | Address |
 |----------|---------|
-| BabyJub.sol | 0x2c40513b343B70f2A0B7e6Ad6F997DDa819D6f07 |
-| ConfidentialTransferVerifier | 0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5 |
-| JanusToken.sol (NATIVE demo) | 0x53F49881A1132FF4F674D2c015e35D5B07Fa1F4A |
-| JanusFlow.cdc (v1.1.0) | 0x28fef3d1d6a12800 |
+| BabyJub.sol | `0x2c40513b343B70f2A0B7e6Ad6F997DDa819D6f07` |
+| ConfidentialTransferVerifier | `0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5` |
+
+### v2 token contracts (current)
+
+See [openjanus/contracts](https://github.com/openjanus/contracts) for v2 addresses.
+
+### v1 contracts (historical — do not use for new development)
+
+| Contract | Address | Status |
+|----------|---------|--------|
+| JanusToken.sol (NATIVE demo) | `0x53F49881A1132FF4F674D2c015e35D5B07Fa1F4A` | **DEPRECATED** |
+| JanusFlow.cdc (v1.1.0) | `0x28fef3d1d6a12800` | **DEPRECATED** |
 
 ---
 

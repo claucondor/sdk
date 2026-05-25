@@ -9,24 +9,16 @@
  *   primitives/ — Low-level crypto (BabyJub, Pedersen, Groth16)
  *   network/    — Flow client + COA management
  *   crypto/     — High-level crypto operations (commitments, proofs)
- *   tokens/     — Token-level abstractions (JanusToken, JanusFlow)
+ *
+ * v1 token module (JanusToken/JanusFlow, Pedersen-hash based) was removed in 0.2.0.
+ * Historical source: git checkout v0.1.0-final
+ * Migration guide: docs/why-v1-was-deprecated.md
  *
  * Adding a new module:
  *   1. Create src/modules/<name>/{types.ts,<name>.ts,index.ts}
  *   2. Re-export from this file under the appropriate namespace
  *   3. See docs/EXTENDING.md for full guidance
  */
-
-// ---------------------------------------------------------------------------
-// Token operations — what most app code uses
-// ---------------------------------------------------------------------------
-export { JanusToken, JANUS_TOKEN_TESTNET } from "./tokens/janus-token";
-export {
-  JanusFlow,
-  JANUS_FLOW_CADENCE_ADDRESS,
-  JANUS_FLOW_VERSION,
-  JANUS_FLOW_PRIMITIVES,
-} from "./tokens/janus-flow";
 
 // ---------------------------------------------------------------------------
 // Crypto operations — for advanced app code and integrators
