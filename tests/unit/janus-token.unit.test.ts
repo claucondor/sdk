@@ -121,7 +121,7 @@ describe("JANUS_TOKEN_ABI", () => {
 // ---------------------------------------------------------------------------
 
 describe("JanusToken class", () => {
-  it("constructs with TokenV2Options", () => {
+  it("constructs with TokenOptions", () => {
     const token = new JanusToken(JANUS_TOKEN_TESTNET);
     expect(token).toBeDefined();
   });

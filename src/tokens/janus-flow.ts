@@ -1,24 +1,22 @@
 /**
- * tokens/janus-flow-v2.ts — JanusFlow Cadence wrapper SDK (ElGamal edition)
+ * tokens/janus-flow.ts — JanusFlow Cadence wrapper SDK (ElGamal edition)
  *
  * JanusFlow wraps Cadence FLOW tokens into ElGamal-encrypted slots.
  * Cross-VM: Cadence transactions call JanusToken on Flow EVM via COA.
  *
  * Deployed contract:
- *   Cadence: 0x28fef3d1d6a12800 — contract name "JanusFlow" (v2.0.0)
+ *   Cadence: 0x28fef3d1d6a12800 — contract name "JanusFlow"
  *
  * Privacy property (from Phase 3 24/24 PASS):
  *   Multiple senders encrypt amounts to the same recipient pubkey.
  *   Recipient decrypts accumulated total without learning per-sender amounts.
  *   On-chain state reveals only that transfers happened, not how much.
  *
- * Architecture vs v1:
- *   v1 (JanusFlow):   Pedersen commitments (C = m*G + r*H), single-base accumulation
- *   v2 (JanusFlow): ElGamal ciphertexts (c1=r*G, c2=m*G+r*PK), multi-sender support
- *
- * The key difference: in v2, any sender can encrypt to any registered recipient PK
- * without needing to coordinate or share blinding factors. Recipients decrypt their
- * own accumulated slot with their secret key + BSGS DLOG solver.
+ * Architecture:
+ *   JanusFlow uses ElGamal ciphertexts (c1=r*G, c2=m*G+r*PK) for multi-sender support.
+ *   Any sender can encrypt to any registered recipient PK without needing to coordinate
+ *   or share blinding factors. Recipients decrypt their accumulated slot with their
+ *   secret key + BSGS DLOG solver.
  */
 
 import type { Point } from "../types/commitment";
@@ -89,7 +87,7 @@ transaction(
 `;
 
 /** Cadence tx: confidential transfer between two registered accounts */
-export const TX_CONFIDENTIAL_TRANSFER_V2 = `
+export const TX_CONFIDENTIAL_TRANSFER = `
 import JanusFlow from 0x28fef3d1d6a12800
 
 transaction(
@@ -172,12 +170,6 @@ export interface JanusFlowOptions {
  * Operations execute as Cadence transactions (cross-VM: Cadence → EVM via COA).
  * Callers provide FCL-compatible authorization functions.
  *
- * Upgrade guide from v1 JanusFlow:
- *   - `sdk.wrap(amount, amountRaw, blinding, authz)` →
- *     `sdk.wrapAndEncrypt(amount, recipient, proofResult, authz)`
- *   - `sdk.confidentialTransfer(recipient, proofInput, authz)` →
- *     `sdk.confidentialTransfer(recipient, proofResult, authz)`
- *   - v1 blinding factors → v2 ElGamal keypair (derive once via deriveKeypair())
  */
 export class JanusFlow {
   private readonly network: FlowNetwork;
@@ -371,7 +363,7 @@ export class JanusFlow {
     const pubInputsArr = [...publicInputs].map((v) => v.toString());
 
     const txId = await fcl.mutate({
-      cadence: TX_CONFIDENTIAL_TRANSFER_V2,
+      cadence: TX_CONFIDENTIAL_TRANSFER,
       args: (arg: unknown, typeOf: unknown) => [
         // @ts-expect-error FCL types are dynamic
         arg(recipient, typeOf.Address),

@@ -1,7 +1,7 @@
 /**
  * tokens/ — ElGamal-based JanusToken and JanusFlow
  *
- * V2 uses additive ElGamal-on-BabyJubJub for multi-sender privacy:
+ * Uses additive ElGamal-on-BabyJubJub for multi-sender privacy:
  *   - Any sender can encrypt to any registered recipient pubkey
  *   - Ciphertexts accumulate homomorphically in the slot
  *   - Recipient decrypts the total without learning per-sender amounts
@@ -39,7 +39,7 @@ export {
 export {
   TX_REGISTER_PUBKEY,
   TX_WRAP_AND_ENCRYPT,
-  TX_CONFIDENTIAL_TRANSFER_V2,
+  TX_CONFIDENTIAL_TRANSFER,
   TX_DECRYPT_AND_UNWRAP,
   SCRIPT_GET_SLOT,
   SCRIPT_GET_PUBKEY,
@@ -51,8 +51,8 @@ export type {
   EncryptedSlot,
   DecryptedBalance,
   ElGamalKeypair,
-  TokenV2Options,
-  TokenV2Deployment,
+  TokenOptions,
+  TokenDeployment,
   EncryptProofInput,
   DecryptProofInput,
   EncryptProofResult,

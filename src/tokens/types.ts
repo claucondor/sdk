@@ -1,7 +1,7 @@
 /**
- * tokens/types.ts — V2-specific types for ElGamal-based JanusToken/JanusFlow
+ * tokens/types.ts — Types for ElGamal-based JanusToken/JanusFlow
  *
- * V2 uses additive ElGamal-on-BabyJubJub instead of Pedersen commitments.
+ * Uses additive ElGamal-on-BabyJubJub for additively homomorphic commitments.
  * Each balance slot stores an ElGamal ciphertext (C1, C2) = (r*G, M + r*PK),
  * where M = m*G (value encoded as curve point) and PK is the recipient's pubkey.
  *
@@ -61,11 +61,11 @@ export interface ElGamalKeypair {
 }
 
 // ---------------------------------------------------------------------------
-// V2 deployment configuration
+// Deployment configuration
 // ---------------------------------------------------------------------------
 
-/** Constructor options for V2 token classes */
-export interface TokenV2Options {
+/** Constructor options for JanusToken / JanusFlow */
+export interface TokenOptions {
   /** Deployed EVM address of JanusToken */
   evmAddress: string;
   /** Network to connect to */
@@ -78,8 +78,8 @@ export interface TokenV2Options {
   decryptVerifierAddress?: string;
 }
 
-/** A fully described V2 token deployment */
-export interface TokenV2Deployment {
+/** A fully described token deployment */
+export interface TokenDeployment {
   /** JanusToken EVM address */
   evm: string;
   /** JanusFlow Cadence account */
@@ -96,7 +96,7 @@ export interface TokenV2Deployment {
 }
 
 // ---------------------------------------------------------------------------
-// V2 proof types
+// Proof types
 // ---------------------------------------------------------------------------
 
 /**
