@@ -1,5 +1,5 @@
 /**
- * tokens-v2/types.ts — V2-specific types for ElGamal-based JanusTokenV2/JanusFlowV2
+ * tokens/types.ts — V2-specific types for ElGamal-based JanusToken/JanusFlow
  *
  * V2 uses additive ElGamal-on-BabyJubJub instead of Pedersen commitments.
  * Each balance slot stores an ElGamal ciphertext (C1, C2) = (r*G, M + r*PK),
@@ -31,7 +31,7 @@ export interface Ciphertext {
 
 /**
  * A single ElGamal-encrypted balance slot.
- * This is what is stored per-address in JanusTokenV2.
+ * This is what is stored per-address in JanusToken.
  */
 export interface EncryptedSlot {
   /** Accumulated ciphertext (sum of all received encryptions) */
@@ -66,7 +66,7 @@ export interface ElGamalKeypair {
 
 /** Constructor options for V2 token classes */
 export interface TokenV2Options {
-  /** Deployed EVM address of JanusTokenV2 */
+  /** Deployed EVM address of JanusToken */
   evmAddress: string;
   /** Network to connect to */
   network: FlowNetwork;
@@ -80,9 +80,9 @@ export interface TokenV2Options {
 
 /** A fully described V2 token deployment */
 export interface TokenV2Deployment {
-  /** JanusTokenV2 EVM address */
+  /** JanusToken EVM address */
   evm: string;
-  /** JanusFlowV2 Cadence account */
+  /** JanusFlow Cadence account */
   cadence: string;
   /** Cadence contract name */
   cadenceContractName: string;

@@ -1,5 +1,5 @@
 /**
- * Unit tests for JanusTokenV2 v2 module — no network required.
+ * Unit tests for JanusToken v2 module — no network required.
  *
  * Tests the types, constants, ABIs, and class API surface of the v2 module.
  * All contract calls are mocked — no Flow EVM connection needed.
@@ -7,13 +7,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  JanusTokenV2,
-  JANUS_TOKEN_V2_TESTNET,
-  JANUS_V2_BABYJUB_ADDRESS,
+  JanusToken,
+  JANUS_TOKEN_TESTNET,
+  JANUS_BABYJUB_ADDRESS,
   ENCRYPT_CONSISTENCY_VERIFIER,
   DECRYPT_OPEN_VERIFIER,
-  JANUS_TOKEN_V2_ABI,
-} from "../../src/tokens-v2/janus-token-v2";
+  JANUS_TOKEN_ABI,
+} from "../../src/tokens/janus-token";
 
 // ---------------------------------------------------------------------------
 // Address format helpers
@@ -27,38 +27,38 @@ function isHexAddress(s: string): boolean {
 // Canonical address assertions
 // ---------------------------------------------------------------------------
 
-describe("JANUS_TOKEN_V2_TESTNET constant", () => {
+describe("JANUS_TOKEN_TESTNET constant", () => {
   it("has v2 EVM address", () => {
-    expect(JANUS_TOKEN_V2_TESTNET.evmAddress).toBe(
+    expect(JANUS_TOKEN_TESTNET.evmAddress).toBe(
       "0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D"
     );
   });
 
   it("evmAddress is a valid 20-byte hex address", () => {
-    expect(isHexAddress(JANUS_TOKEN_V2_TESTNET.evmAddress)).toBe(true);
+    expect(isHexAddress(JANUS_TOKEN_TESTNET.evmAddress)).toBe(true);
   });
 
   it("network is testnet", () => {
-    expect(JANUS_TOKEN_V2_TESTNET.network).toBe("testnet");
+    expect(JANUS_TOKEN_TESTNET.network).toBe("testnet");
   });
 
   it("babyJubAddress matches canonical deployment", () => {
-    expect(JANUS_TOKEN_V2_TESTNET.babyJubAddress).toBe(JANUS_V2_BABYJUB_ADDRESS);
+    expect(JANUS_TOKEN_TESTNET.babyJubAddress).toBe(JANUS_BABYJUB_ADDRESS);
   });
 
   it("encryptVerifierAddress matches canonical deployment", () => {
-    expect(JANUS_TOKEN_V2_TESTNET.encryptVerifierAddress).toBe(ENCRYPT_CONSISTENCY_VERIFIER);
+    expect(JANUS_TOKEN_TESTNET.encryptVerifierAddress).toBe(ENCRYPT_CONSISTENCY_VERIFIER);
   });
 
   it("decryptVerifierAddress matches canonical deployment", () => {
-    expect(JANUS_TOKEN_V2_TESTNET.decryptVerifierAddress).toBe(DECRYPT_OPEN_VERIFIER);
+    expect(JANUS_TOKEN_TESTNET.decryptVerifierAddress).toBe(DECRYPT_OPEN_VERIFIER);
   });
 });
 
 describe("Canonical v2 addresses", () => {
-  it("JANUS_V2_BABYJUB_ADDRESS is valid hex address", () => {
-    expect(isHexAddress(JANUS_V2_BABYJUB_ADDRESS)).toBe(true);
-    expect(JANUS_V2_BABYJUB_ADDRESS).toBe("0x27139AFda7425f51F68D32e0A38b7D43BcB0f870");
+  it("JANUS_BABYJUB_ADDRESS is valid hex address", () => {
+    expect(isHexAddress(JANUS_BABYJUB_ADDRESS)).toBe(true);
+    expect(JANUS_BABYJUB_ADDRESS).toBe("0x27139AFda7425f51F68D32e0A38b7D43BcB0f870");
   });
 
   it("ENCRYPT_CONSISTENCY_VERIFIER is valid hex address", () => {
@@ -75,8 +75,8 @@ describe("Canonical v2 addresses", () => {
 
   it("all three addresses are distinct", () => {
     const addrs = new Set([
-      JANUS_TOKEN_V2_TESTNET.evmAddress.toLowerCase(),
-      JANUS_V2_BABYJUB_ADDRESS.toLowerCase(),
+      JANUS_TOKEN_TESTNET.evmAddress.toLowerCase(),
+      JANUS_BABYJUB_ADDRESS.toLowerCase(),
       ENCRYPT_CONSISTENCY_VERIFIER.toLowerCase(),
       DECRYPT_OPEN_VERIFIER.toLowerCase(),
     ]);
@@ -84,82 +84,82 @@ describe("Canonical v2 addresses", () => {
   });
 });
 
-describe("JANUS_TOKEN_V2_ABI", () => {
+describe("JANUS_TOKEN_ABI", () => {
   it("is a non-empty array", () => {
-    expect(Array.isArray(JANUS_TOKEN_V2_ABI)).toBe(true);
-    expect(JANUS_TOKEN_V2_ABI.length).toBeGreaterThan(0);
+    expect(Array.isArray(JANUS_TOKEN_ABI)).toBe(true);
+    expect(JANUS_TOKEN_ABI.length).toBeGreaterThan(0);
   });
 
   it("contains registerPubkey", () => {
-    const entry = JANUS_TOKEN_V2_ABI.find((e) => e.includes("registerPubkey"));
+    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("registerPubkey"));
     expect(entry).toBeDefined();
   });
 
   it("contains getSlotRaw (for reading ciphertext)", () => {
-    const entry = JANUS_TOKEN_V2_ABI.find((e) => e.includes("getSlotRaw"));
+    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("getSlotRaw"));
     expect(entry).toBeDefined();
   });
 
   it("contains confidentialTransfer", () => {
-    const entry = JANUS_TOKEN_V2_ABI.find((e) => e.includes("confidentialTransfer"));
+    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("confidentialTransfer"));
     expect(entry).toBeDefined();
   });
 
   it("contains decryptAndUnwrap", () => {
-    const entry = JANUS_TOKEN_V2_ABI.find((e) => e.includes("decryptAndUnwrap"));
+    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("decryptAndUnwrap"));
     expect(entry).toBeDefined();
   });
 
   it("contains PubkeyRegistered event", () => {
-    const entry = JANUS_TOKEN_V2_ABI.find((e) => e.includes("PubkeyRegistered"));
+    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("PubkeyRegistered"));
     expect(entry).toBeDefined();
   });
 });
 
 // ---------------------------------------------------------------------------
-// JanusTokenV2 class — API surface + guard checks
+// JanusToken class — API surface + guard checks
 // ---------------------------------------------------------------------------
 
-describe("JanusTokenV2 class", () => {
+describe("JanusToken class", () => {
   it("constructs with TokenV2Options", () => {
-    const token = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
+    const token = new JanusToken(JANUS_TOKEN_TESTNET);
     expect(token).toBeDefined();
   });
 
   it("address getter returns evmAddress before connect", () => {
-    const token = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
-    expect(token.address).toBe(JANUS_TOKEN_V2_TESTNET.evmAddress);
+    const token = new JanusToken(JANUS_TOKEN_TESTNET);
+    expect(token.address).toBe(JANUS_TOKEN_TESTNET.evmAddress);
   });
 
   it("balanceOfCommitment alias: getBalanceCiphertext throws before connect", async () => {
-    const token = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
+    const token = new JanusToken(JANUS_TOKEN_TESTNET);
     await expect(token.getBalanceCiphertext("0x0000000000000000000000000000000000000001")).rejects.toThrow(
       /not connected/
     );
   });
 
   it("pubkeyOf throws before connect", async () => {
-    const token = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
+    const token = new JanusToken(JANUS_TOKEN_TESTNET);
     await expect(token.pubkeyOf("0x0000000000000000000000000000000000000001")).rejects.toThrow(
       /not connected/
     );
   });
 
   it("hasPubkey throws before connect", async () => {
-    const token = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
+    const token = new JanusToken(JANUS_TOKEN_TESTNET);
     await expect(token.hasPubkey("0x0000000000000000000000000000000000000001")).rejects.toThrow(
       /not connected/
     );
   });
 
   it("registerPubkey throws before connect", async () => {
-    const token = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
+    const token = new JanusToken(JANUS_TOKEN_TESTNET);
     const pk = { x: 1n, y: 1n };
     await expect(token.registerPubkey(pk)).rejects.toThrow(/not connected/);
   });
 
   it("getBalanceSlot throws before connect", async () => {
-    const token = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
+    const token = new JanusToken(JANUS_TOKEN_TESTNET);
     await expect(
       token.getBalanceSlot("0x0000000000000000000000000000000000000001")
     ).rejects.toThrow(/not connected/);

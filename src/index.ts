@@ -9,11 +9,7 @@
  *   primitives/ — Low-level crypto (BabyJub, Pedersen, Groth16)
  *   network/    — Flow client + COA management
  *   crypto/     — High-level crypto operations (commitments, proofs)
- *   tokens-v2/  — v2 token abstractions (JanusTokenV2, JanusFlowV2 — ElGamal-on-BabyJub)
- *
- * v1 token module (JanusToken/JanusFlow, Pedersen-hash based) was removed in 0.2.0.
- * Historical source: git checkout v0.1.0-final
- * Migration guide: docs/why-v1-was-deprecated.md
+ *   tokens/ — JanusToken, JanusFlow (ElGamal-on-BabyJub confidential token stack)
  *
  * Adding a new module:
  *   1. Create src/modules/<name>/{types.ts,<name>.ts,index.ts}
@@ -22,19 +18,19 @@
  */
 
 // ---------------------------------------------------------------------------
-// Token operations — v2 (ElGamal-on-BabyJub) — RECOMMENDED for new apps
-// Provides multi-sender privacy: recipients learn only the total, not per-sender amounts
+// Token operations — ElGamal-on-BabyJub confidential token stack
+// Multi-sender privacy: recipients learn only the total, not per-sender amounts
 // ---------------------------------------------------------------------------
 export {
-  JanusTokenV2,
-  JanusFlowV2,
-  JANUS_TOKEN_V2_TESTNET,
-  JANUS_FLOW_V2_CADENCE_ADDRESS,
-  JANUS_FLOW_V2_VERSION,
-  JANUS_V2_BABYJUB_ADDRESS,
+  JanusToken,
+  JanusFlow,
+  JANUS_TOKEN_TESTNET,
+  JANUS_FLOW_CADENCE_ADDRESS,
+  JANUS_FLOW_VERSION,
+  JANUS_BABYJUB_ADDRESS,
   ENCRYPT_CONSISTENCY_VERIFIER,
   DECRYPT_OPEN_VERIFIER,
-} from "./tokens-v2";
+} from "./tokens";
 
 // ---------------------------------------------------------------------------
 // Crypto operations — for advanced app code and integrators
@@ -63,7 +59,7 @@ export type { FlowNetwork } from "./network";
 export * as primitives from "./primitives";
 export * as network from "./network";
 export * as utils from "./utils";
-export * as elgamal from "./primitives/babyjub"; // re-exported as elgamal for v2 users
+export * as elgamal from "./primitives/babyjub"; // re-exported as elgamal for token users
 
 // ---------------------------------------------------------------------------
 // Shared types — import these for TypeScript type annotations

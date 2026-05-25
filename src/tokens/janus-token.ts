@@ -1,7 +1,7 @@
 /**
- * tokens-v2/janus-token-v2.ts — JanusTokenV2 EVM SDK class (ElGamal edition)
+ * tokens/janus-token.ts — JanusToken EVM SDK class (ElGamal edition)
  *
- * JanusTokenV2 replaces Pedersen commitments with additive ElGamal-on-BabyJubJub.
+ * JanusToken replaces Pedersen commitments with additive ElGamal-on-BabyJubJub.
  * Each balance slot stores (c1, c2) = (r*G, m*G + r*PK) so multiple senders can
  * encrypt to the same recipient pubkey and the ciphertexts accumulate homomorphically.
  * The recipient decrypts to a sum total without learning per-sender amounts.
@@ -12,15 +12,15 @@
  *   Bob cannot learn individual sender amounts from the on-chain state.
  *
  * Canonical testnet deployment (v2):
- *   EVM:  0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D  (JanusTokenV2)
+ *   EVM:  0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D  (JanusToken)
  *   BabyJub.sol: 0x27139AFda7425f51F68D32e0A38b7D43BcB0f870
  *   EncryptConsistencyVerifier: 0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C
  *   DecryptOpenVerifier:        0x3bB139B5404fD6b152813bC3532367AAa096638b
  *
  * Quick start (read-only):
- *   import { JanusTokenV2, JANUS_TOKEN_V2_TESTNET } from "@openjanus/sdk/tokens-v2";
+ *   import { JanusToken, JANUS_TOKEN_TESTNET } from "@openjanus/sdk/tokens";
  *
- *   const token = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
+ *   const token = new JanusToken(JANUS_TOKEN_TESTNET);
  *   await token.connect();
  *   const slot = await token.getBalanceSlot("0xAlice");
  *
@@ -45,7 +45,7 @@ import { NETWORK_CONFIG } from "../network/flow-client";
 // ---------------------------------------------------------------------------
 
 /** BabyJub.sol address used by v2 (lab/stateless deployment, re-used from primitives) */
-export const JANUS_V2_BABYJUB_ADDRESS = "0x27139AFda7425f51F68D32e0A38b7D43BcB0f870";
+export const JANUS_BABYJUB_ADDRESS = "0x27139AFda7425f51F68D32e0A38b7D43BcB0f870";
 
 /** EncryptConsistencyVerifier — proves ciphertext encrypts m to PK */
 export const ENCRYPT_CONSISTENCY_VERIFIER = "0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C";
@@ -54,10 +54,10 @@ export const ENCRYPT_CONSISTENCY_VERIFIER = "0x6F8Cc93dd6aA7B3ED0a3DaA7527181555
 export const DECRYPT_OPEN_VERIFIER = "0x3bB139B5404fD6b152813bC3532367AAa096638b";
 
 /** Canonical v2 testnet deployment options */
-export const JANUS_TOKEN_V2_TESTNET: TokenV2Options = {
+export const JANUS_TOKEN_TESTNET: TokenV2Options = {
   evmAddress: "0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D",
   network: "testnet",
-  babyJubAddress: JANUS_V2_BABYJUB_ADDRESS,
+  babyJubAddress: JANUS_BABYJUB_ADDRESS,
   encryptVerifierAddress: ENCRYPT_CONSISTENCY_VERIFIER,
   decryptVerifierAddress: DECRYPT_OPEN_VERIFIER,
 };
@@ -66,7 +66,7 @@ export const JANUS_TOKEN_V2_TESTNET: TokenV2Options = {
 // Minimal ABI — only methods the SDK calls
 // ---------------------------------------------------------------------------
 
-export const JANUS_TOKEN_V2_ABI = [
+export const JANUS_TOKEN_ABI = [
   // Pubkey registration
   "function registerPubkey(uint256 pkx, uint256 pky)",
   "function pubkeyOf(address account) view returns (uint256 pkx, uint256 pky)",
@@ -88,10 +88,10 @@ export const JANUS_TOKEN_V2_ABI = [
 ] as const;
 
 // ---------------------------------------------------------------------------
-// JanusTokenV2 class
+// JanusToken class
 // ---------------------------------------------------------------------------
 
-export class JanusTokenV2 {
+export class JanusToken {
   private readonly opts: TokenV2Options;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private contract: any = null;
@@ -111,7 +111,7 @@ export class JanusTokenV2 {
     const { ethers } = await import("ethers");
     const rpc = NETWORK_CONFIG[this.opts.network].evmRpc;
     const provider = new ethers.JsonRpcProvider(rpc);
-    this.contract = new ethers.Contract(this.opts.evmAddress, JANUS_TOKEN_V2_ABI, provider);
+    this.contract = new ethers.Contract(this.opts.evmAddress, JANUS_TOKEN_ABI, provider);
     return this;
   }
 
@@ -120,7 +120,7 @@ export class JanusTokenV2 {
   async connectWithSigner(signer: any): Promise<this> {
     const { ethers } = await import("ethers");
     this.signer = signer;
-    this.contract = new ethers.Contract(this.opts.evmAddress, JANUS_TOKEN_V2_ABI, signer);
+    this.contract = new ethers.Contract(this.opts.evmAddress, JANUS_TOKEN_ABI, signer);
     return this;
   }
 
@@ -289,7 +289,7 @@ export class JanusTokenV2 {
   private _contract(): any {
     if (!this.contract) {
       throw new Error(
-        "JanusTokenV2: not connected. Call await token.connect() or await token.connectWithSigner(signer) first."
+        "JanusToken: not connected. Call await token.connect() or await token.connectWithSigner(signer) first."
       );
     }
     return this.contract;

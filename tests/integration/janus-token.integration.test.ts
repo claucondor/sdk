@@ -1,19 +1,19 @@
 /**
- * Integration tests — JanusTokenV2 on Flow testnet (READ-ONLY).
+ * Integration tests — JanusToken on Flow testnet (READ-ONLY).
  *
  * Tests the SDK against the canonical v2 deployment:
- *   JanusTokenV2 EVM: 0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D
+ *   JanusToken EVM: 0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D
  *   EncryptConsistencyVerifier: 0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C
  *   DecryptOpenVerifier:        0x3bB139B5404fD6b152813bC3532367AAa096638b
  *   BabyJub.sol: 0x27139AFda7425f51F68D32e0A38b7D43BcB0f870
  *   Network: Flow EVM testnet (chainId 545)
  *
  * These tests are READ-ONLY — no private key required.
- * Run: RUN_INTEGRATION=1 npx vitest run tests/integration/janus-token-v2.integration.test.ts
+ * Run: RUN_INTEGRATION=1 npx vitest run tests/integration/janus-token.integration.test.ts
  */
 
 import { describe, it, expect } from "vitest";
-import { JanusTokenV2, JANUS_TOKEN_V2_TESTNET } from "../../src/tokens-v2/janus-token-v2";
+import { JanusToken, JANUS_TOKEN_TESTNET } from "../../src/tokens/janus-token";
 
 const runIntegration = process.env.RUN_INTEGRATION === "1";
 
@@ -27,18 +27,18 @@ const OPENJANUS_COA = "0x0000000000000000000000027eb18dc34b9966fd";
 const BN254_FIELD_PRIME =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
-describe("JanusTokenV2 integration (read-only)", () => {
-  let token: JanusTokenV2;
+describe("JanusToken integration (read-only)", () => {
+  let token: JanusToken;
 
   const setup = async () => {
-    token = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
+    token = new JanusToken(JANUS_TOKEN_TESTNET);
     await token.connect();
   };
 
   it.skipIf(!runIntegration)("I1: connects and address is correct", async () => {
     await setup();
     expect(token.address.toLowerCase()).toBe(
-      JANUS_TOKEN_V2_TESTNET.evmAddress.toLowerCase()
+      JANUS_TOKEN_TESTNET.evmAddress.toLowerCase()
     );
   });
 
@@ -100,9 +100,9 @@ describe("JanusTokenV2 integration (read-only)", () => {
   );
 
   it.skipIf(!runIntegration)(
-    "I7: connect() returns the JanusTokenV2 instance for chaining",
+    "I7: connect() returns the JanusToken instance for chaining",
     async () => {
-      const t = new JanusTokenV2(JANUS_TOKEN_V2_TESTNET);
+      const t = new JanusToken(JANUS_TOKEN_TESTNET);
       const result = await t.connect();
       expect(result).toBe(t);
     }

@@ -1,11 +1,11 @@
 /**
- * tokens-v2/janus-flow-v2.ts — JanusFlowV2 Cadence wrapper SDK (ElGamal edition)
+ * tokens/janus-flow-v2.ts — JanusFlow Cadence wrapper SDK (ElGamal edition)
  *
- * JanusFlowV2 wraps Cadence FLOW tokens into ElGamal-encrypted slots.
- * Cross-VM: Cadence transactions call JanusTokenV2 on Flow EVM via COA.
+ * JanusFlow wraps Cadence FLOW tokens into ElGamal-encrypted slots.
+ * Cross-VM: Cadence transactions call JanusToken on Flow EVM via COA.
  *
  * Deployed contract:
- *   Cadence: 0x28fef3d1d6a12800 — contract name "JanusFlowV2" (v2.0.0)
+ *   Cadence: 0x28fef3d1d6a12800 — contract name "JanusFlow" (v2.0.0)
  *
  * Privacy property (from Phase 3 24/24 PASS):
  *   Multiple senders encrypt amounts to the same recipient pubkey.
@@ -14,7 +14,7 @@
  *
  * Architecture vs v1:
  *   v1 (JanusFlow):   Pedersen commitments (C = m*G + r*H), single-base accumulation
- *   v2 (JanusFlowV2): ElGamal ciphertexts (c1=r*G, c2=m*G+r*PK), multi-sender support
+ *   v2 (JanusFlow): ElGamal ciphertexts (c1=r*G, c2=m*G+r*PK), multi-sender support
  *
  * The key difference: in v2, any sender can encrypt to any registered recipient PK
  * without needing to coordinate or share blinding factors. Recipients decrypt their
@@ -30,31 +30,31 @@ import type { Ciphertext, EncryptProofResult, DecryptProofResult } from "./types
 // Deployment info
 // ---------------------------------------------------------------------------
 
-export const JANUS_FLOW_V2_CADENCE_ADDRESS = "0x28fef3d1d6a12800";
-export const JANUS_FLOW_V2_CONTRACT_NAME = "JanusFlowV2";
-export const JANUS_FLOW_V2_VERSION = "2.0.0";
+export const JANUS_FLOW_CADENCE_ADDRESS = "0x28fef3d1d6a12800";
+export const JANUS_FLOW_CONTRACT_NAME = "JanusFlow";
+export const JANUS_FLOW_VERSION = "0.1.0";
 
-export const JANUS_FLOW_V2_EVM_ADDRESS = "0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D";
+export const JANUS_FLOW_EVM_ADDRESS = "0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D";
 
 // ---------------------------------------------------------------------------
-// Cadence transaction strings — JanusFlowV2
+// Cadence transaction strings — JanusFlow
 // ---------------------------------------------------------------------------
 
 /** Cadence tx: register BabyJubJub pubkey (one-time setup per account) */
 export const TX_REGISTER_PUBKEY = `
-import JanusFlowV2 from 0x28fef3d1d6a12800
+import JanusFlow from 0x28fef3d1d6a12800
 
 transaction(pkx: UInt256, pky: UInt256) {
     prepare(signer: auth(BorrowValue) &Account) {}
     execute {
-        JanusFlowV2.registerPubkey(pkx: pkx, pky: pky)
+        JanusFlow.registerPubkey(pkx: pkx, pky: pky)
     }
 }
 `;
 
 /** Cadence tx: wrap FLOW and encrypt amount to a recipient's pubkey */
 export const TX_WRAP_AND_ENCRYPT = `
-import JanusFlowV2 from 0x28fef3d1d6a12800
+import JanusFlow from 0x28fef3d1d6a12800
 import FungibleToken from 0x9a0766d93b6608b7
 import FlowToken from 0x7e60df042a9c0868
 
@@ -76,7 +76,7 @@ transaction(
     }
 
     execute {
-        JanusFlowV2.wrapAndEncrypt(
+        JanusFlow.wrapAndEncrypt(
             vault: <-self.vault,
             recipient: recipient,
             c1x: c1x, c1y: c1y,
@@ -90,7 +90,7 @@ transaction(
 
 /** Cadence tx: confidential transfer between two registered accounts */
 export const TX_CONFIDENTIAL_TRANSFER_V2 = `
-import JanusFlowV2 from 0x28fef3d1d6a12800
+import JanusFlow from 0x28fef3d1d6a12800
 
 transaction(
     recipient: Address,
@@ -101,7 +101,7 @@ transaction(
 ) {
     prepare(signer: auth(BorrowValue) &Account) {}
     execute {
-        JanusFlowV2.confidentialTransfer(
+        JanusFlow.confidentialTransfer(
             recipient: recipient,
             c1x: c1x, c1y: c1y,
             c2x: c2x, c2y: c2y,
@@ -114,7 +114,7 @@ transaction(
 
 /** Cadence tx: decrypt accumulated slot and unwrap FLOW to recipient */
 export const TX_DECRYPT_AND_UNWRAP = `
-import JanusFlowV2 from 0x28fef3d1d6a12800
+import JanusFlow from 0x28fef3d1d6a12800
 import FungibleToken from 0x9a0766d93b6608b7
 import FlowToken from 0x7e60df042a9c0868
 
@@ -126,7 +126,7 @@ transaction(
 ) {
     prepare(signer: auth(BorrowValue) &Account) {}
     execute {
-        let vault <- JanusFlowV2.decryptAndUnwrap(
+        let vault <- JanusFlow.decryptAndUnwrap(
             amount: amount,
             proof: proof,
             pubInputs: pubInputs
@@ -142,32 +142,32 @@ transaction(
 
 /** Cadence script: read a user's encrypted slot */
 export const SCRIPT_GET_SLOT = `
-import JanusFlowV2 from 0x28fef3d1d6a12800
+import JanusFlow from 0x28fef3d1d6a12800
 
 access(all) fun main(user: Address): {String: UInt256} {
-    return JanusFlowV2.getSlot(user: user)
+    return JanusFlow.getSlot(user: user)
 }
 `;
 
 /** Cadence script: read a user's registered pubkey */
 export const SCRIPT_GET_PUBKEY = `
-import JanusFlowV2 from 0x28fef3d1d6a12800
+import JanusFlow from 0x28fef3d1d6a12800
 
 access(all) fun main(user: Address): {String: UInt256} {
-    return JanusFlowV2.getPubkey(user: user)
+    return JanusFlow.getPubkey(user: user)
 }
 `;
 
 // ---------------------------------------------------------------------------
-// JanusFlowV2 class
+// JanusFlow class
 // ---------------------------------------------------------------------------
 
-export interface JanusFlowV2Options {
+export interface JanusFlowOptions {
   network: FlowNetwork;
 }
 
 /**
- * JanusFlowV2 SDK — ElGamal-based confidential FLOW wrapping via Cadence.
+ * JanusFlow SDK — ElGamal-based confidential FLOW wrapping via Cadence.
  *
  * Operations execute as Cadence transactions (cross-VM: Cadence → EVM via COA).
  * Callers provide FCL-compatible authorization functions.
@@ -179,10 +179,10 @@ export interface JanusFlowV2Options {
  *     `sdk.confidentialTransfer(recipient, proofResult, authz)`
  *   - v1 blinding factors → v2 ElGamal keypair (derive once via deriveKeypair())
  */
-export class JanusFlowV2 {
+export class JanusFlow {
   private readonly network: FlowNetwork;
 
-  constructor(opts: JanusFlowV2Options = { network: "testnet" }) {
+  constructor(opts: JanusFlowOptions = { network: "testnet" }) {
     this.network = opts.network;
   }
 
@@ -407,7 +407,7 @@ export class JanusFlowV2 {
    *
    * Generates a decrypt-open proof proving the caller knows their secret key
    * and the decryption is correct. The proof is verified on-chain, then FLOW
-   * is released from the JanusFlowV2 vault to the specified recipient.
+   * is released from the JanusFlow vault to the specified recipient.
    *
    * @param amount      UFix64 string of FLOW to unwrap (e.g. "42.0")
    * @param to          Cadence address to receive the unwrapped FLOW

@@ -4,58 +4,42 @@ All notable changes to `@openjanus/sdk` are documented here.
 
 ---
 
-## [0.2.0] — 2026-05-25
-
-### Removed (Breaking)
-
-- **v1 token stack** (`src/tokens/` — `JanusToken`, `JanusFlow`, Pedersen-hash based) has been archived.
-  - Reason: circomlib Pedersen is a multi-base hash function, not a 2-generator EC commitment.
-    The accumulated commitment slot does not open to a "total" value in multi-sender scenarios.
-    Additionally, the Cadence `vault.withdraw(amount: amount)` call emits a standard
-    `TokensWithdrawn` event with plaintext amount, defeating amount privacy for JanusFlow users.
-    This meant recipients (or chain indexers) could recover per-sender amounts — defeating the
-    privacy property the system claimed.
-  - Replacement: v2 stack using ElGamal-on-BabyJub provides true recipient-knows-total-only
-    privacy. See [openjanus/contracts](https://github.com/openjanus/contracts) for v2 contracts.
-  - Migration: see [docs/why-v1-was-deprecated.md](docs/why-v1-was-deprecated.md).
-  - Historical access: `git checkout v0.1.0-final` or `npm install @openjanus/sdk@^0.1.0`.
-  - v1 contracts remain deployed on Flow EVM testnet for historical reference;
-    they should not be used for new development.
-- Removed `./tokens` package export from `package.json`
-- Removed `tokens/index` entry from `tsup.config.ts`
-- Removed v1 integration tests (`tests/integration/janus-token.integration.test.ts`)
-- Removed v1 examples (`examples/basic-transfer.ts`, `examples/multi-wrap.ts`)
-  - Legacy examples preserved as non-runnable reference at `docs/legacy/EXAMPLES_V1.md`
+## [0.1.0] — 2026-05-25
 
 ### Added
 
-- `docs/why-v1-was-deprecated.md` — public-friendly explanation of the v1 privacy limitation
-  and migration guide
-- `docs/legacy/EXAMPLES_V1.md` — archived v1 example code for historical reference
+- `src/tokens/janus-token.ts` — `JanusToken` EVM SDK class (ElGamal accumulator):
+  - `connect()` / `connectWithSigner()` — read-only and signing modes
+  - `registerPubkey(pk)` — one-time BabyJubJub key registration
+  - `getBalanceCiphertext(account)` / `getBalanceSlot(account)` — read encrypted slot
+  - `hasPubkey(account)` / `pubkeyOf(account)` — pubkey registry queries
+  - `encryptTo(recipient, proofResult, value)` — wrap FLOW + encrypt to recipient
+  - `confidentialTransfer(recipient, proofResult)` — slot-to-slot transfer
+  - `decryptAndUnwrap(to, amount, proofResult)` — prove decryption + release FLOW
+  - Canonical testnet addresses exported as `JANUS_TOKEN_TESTNET`
 
-### Kept (no change)
+- `src/tokens/janus-flow.ts` — `JanusFlow` Cadence cross-VM SDK class:
+  - `configure()` -- configure FCL for network
+  - `registerPubkey(pk, authz)` -- one-time pubkey registration
+  - `wrapAndEncrypt(amount, recipient, proofResult, authz)` -- wrap FLOW + encrypt
+  - `confidentialTransfer(recipient, proofResult, authz)` -- Cadence confidential transfer
+  - `decryptAndUnwrap(amount, to, proofResult, authz)` -- release FLOW after decryption
+  - `getSlot(userAddress)` / `getPubkey(userAddress)` -- read-only queries
+  - Cadence transaction templates exported for custom integrations
 
-- `src/primitives/` — BabyJub, Pedersen, Groth16 primitives (still valid, used by v2 verifiers)
-- `src/crypto/` — commitment utilities, transfer proof generation
-- `src/network/` — Flow client, COA helpers
-- `src/utils/` — hex utilities, pi_b swap
-- `src/types/` — shared TypeScript types
-- All 72 unit tests pass
+- `src/crypto/` -- `computeCommitment`, `addCommitments`, `buildTransferProof`, `generateBlinding`
+- `src/primitives/` -- BabyJub, Pedersen, Groth16 low-level wrappers
+- `src/network/` -- `createEvmWallet`, `createEvmProvider`, `configureFCL`
+- `src/utils/` -- hex utilities, pi_b swap (EIP-197 BN254 proof format)
 
----
-
-## [0.1.0] — 2026-05-24
-
-Initial release with v1 (Pedersen-hash) token stack.
-
-- `src/tokens/janus-token.ts` — `JanusToken` EVM SDK class (NATIVE + WRAPPER mode)
-- `src/tokens/janus-flow.ts` — `JanusFlow` Cadence cross-VM SDK class
-- `src/crypto/` — `computeCommitment`, `addCommitments`, `buildTransferProof`, `generateBlinding`
-- `src/primitives/` — BabyJub, Pedersen, Groth16 low-level wrappers
-- `src/network/` — `createEvmWallet`, `createEvmProvider`, `configureFCL`
-- 72 unit tests (babyjub, pedersen, groth16, utils)
 - Deployed contracts (Flow EVM testnet):
-  - `JanusToken.sol`: `0x53F49881A1132FF4F674D2c015e35D5B07Fa1F4A`
-  - `JanusFlow.cdc`: `0x28fef3d1d6a12800` (contract: `JanusFlow` v1.1.0)
-  - `BabyJub.sol`: `0x2c40513b343B70f2A0B7e6Ad6F997DDa819D6f07`
-  - `ConfidentialTransferVerifier`: `0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5`
+  - `JanusToken.sol`: `0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D`
+  - `JanusFlow.cdc`: `0x28fef3d1d6a12800` (contract: `JanusFlow`)
+  - `BabyJub.sol`: `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870`
+  - `EncryptConsistencyVerifier`: `0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C`
+  - `DecryptOpenVerifier`: `0x3bB139B5404fD6b152813bC3532367AAa096638b`
+
+- Privacy property confirmed (24/24 e2e tests PASS):
+  - Bob receives 10 + 25 + 7 FLOW from Alice, Carol, Dave
+  - Bob decrypts accumulated slot to 42 -- cannot recover individual amounts
+  - All fraud cases rejected (wrong amount, wrong privkey, BSGS boundary, range overflow, premature rotation)
