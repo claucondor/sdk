@@ -2,8 +2,30 @@
 
 Unified TypeScript SDK for OpenJanus privacy primitives on Flow.
 
-Consolidates @openjanus/babyjub, @openjanus/pedersen, @openjanus/groth16,
-and @openjanus/janus-token into a single, extensible package.
+Consolidates @openjanus/babyjub, @openjanus/pedersen, and @openjanus/groth16
+into a single, extensible package. Provides the cryptographic foundation for
+the v2 ElGamal-on-BabyJub confidential token stack.
+
+---
+
+## Versioning
+
+| Version | Status | Description |
+|---------|--------|-------------|
+| `^0.2.0` | **Current** | v2 token stack (ElGamal-on-BabyJub) + primitives. v1 token layer archived. |
+| `^0.1.0` | **Legacy (deprecated)** | v1 stack: Pedersen-hash based JanusToken/JanusFlow. Has known privacy limitation. Do not use for new apps. |
+
+### Why v1 was deprecated
+
+v1 used circomlib's Pedersen hash for balance commitments. While cryptographically binding and
+hiding, this hash is not additively homomorphic in the value domain, and the Cadence cross-VM
+wrap layer leaked plaintext amounts via standard `TokensWithdrawn` events. In multi-sender
+scenarios, recipients could recover per-sender amounts — defeating the privacy goal.
+
+v2 replaces this with ElGamal-on-BabyJub encryption, which is additively homomorphic and does
+not require per-sender amount knowledge to decrypt.
+
+Full explanation: [docs/why-v1-was-deprecated.md](docs/why-v1-was-deprecated.md)
 
 ---
 
@@ -18,17 +40,6 @@ Dependencies (installed automatically):
 - `@onflow/fcl` ^1.13 — Cadence transactions
 - `circomlibjs` ^0.1.7 — Pedersen hash (BabyJubJub)
 - `snarkjs` ^0.7.6 — Groth16 proof generation
-
----
-
-## Version guide
-
-| Version | Module | Crypto | Use when |
-|---------|--------|--------|----------|
-| v1 | `tokens/` | Pedersen commitments | Existing apps, single-sender, backward compat |
-| v2 | `tokens-v2/` | ElGamal-on-BabyJubJub | **New apps** — multi-sender privacy, no blinding-factor coordination |
-
-**v2 is recommended for all new applications.** In v2, multiple senders can encrypt amounts to the same recipient pubkey independently. The recipient decrypts the accumulated total without learning per-sender amounts. This privacy property was confirmed in Phase 3 end-to-end testing (24/24 pass).
 
 ---
 
@@ -66,24 +77,9 @@ const decryptResult = await buildDecryptProof({ ciphertext: aliceSlot, secretKey
 await sdk.decryptAndUnwrap("42.0", ALICE_CADENCE_ADDR, decryptResult, aliceAuthz);
 ```
 
-See [docs/v1-vs-v2.md](docs/v1-vs-v2.md) for full migration guide.
-
 ---
 
-## Quick start — v1 (Pedersen, legacy)
-
-### Read a JanusToken balance
-
-```typescript
-import { JanusToken, JANUS_TOKEN_TESTNET } from "@openjanus/sdk";
-
-const token = new JanusToken(JANUS_TOKEN_TESTNET);
-await token.connect();
-
-const commit = await token.balanceOfCommitment("0xAliceAddress");
-// identity (0, 1) means zero balance
-console.log(commit); // { x: 0n, y: 1n }
-```
+## Quick start — primitives (low-level crypto)
 
 ### Compute a Pedersen commitment
 
@@ -118,63 +114,22 @@ console.log(proofResult.locallyVerified); // true
 // proofResult.proof and proofResult.publicInputs are ready for on-chain submission
 ```
 
-### JanusFlow wrap + transfer (Cadence)
-
-```typescript
-import { JanusFlow } from "@openjanus/sdk";
-
-const sdk = new JanusFlow({ network: "testnet" });
-await sdk.configure();
-
-// Wrap 10 FLOW
-const { txId: wrapTx, commitment } = await sdk.wrap(
-  "10.0",
-  10n,
-  aliceBlinding,
-  aliceAuthz  // FCL authorization function
-);
-console.log("Wrap TX:", wrapTx);
-
-// Transfer 3 FLOW to Bob
-const { txId: transferTx } = await sdk.confidentialTransfer(
-  BOB_CADENCE_ADDRESS,
-  {
-    oldBalance: 10n,
-    oldBlinding: aliceBlinding,
-    transferAmount: 3n,
-    transferBlinding: generateBlinding(),
-    newBlinding: generateBlinding(),
-    wasmPath,
-    zkeyPath,
-  },
-  aliceAuthz
-);
-console.log("Transfer TX:", transferTx);
-```
-
 ---
 
 ## Module structure
 
 ```
 @openjanus/sdk
-├── tokens/      JanusToken (EVM NATIVE, v1 Pedersen), JanusFlow (Cadence WRAPPER, v1)
-├── tokens-v2/   JanusTokenV2 (EVM, v2 ElGamal), JanusFlowV2 (Cadence, v2)  ← NEW
+├── tokens-v2/   JanusTokenV2 (EVM, v2 ElGamal), JanusFlowV2 (Cadence, v2)
 ├── crypto/      computeCommitment, buildTransferProof, generateBlinding
 ├── primitives/  BabyJub, Pedersen, Groth16 (low-level)
 ├── network/     createEvmWallet, createEvmProvider, COA helpers
 └── utils/       hex conversion, pi_b swap
 ```
 
----
-
-## Examples
-
-```bash
-# Print commitment math and SDK API usage (no network required)
-npx ts-node --esm examples/basic-transfer.ts
-npx ts-node --esm examples/multi-wrap.ts
-```
+> The v1 `tokens/` module (JanusToken, JanusFlow, Pedersen-based) was archived in 0.2.0.
+> Historical source: `git checkout v0.1.0-final`
+> Migration: [docs/why-v1-was-deprecated.md](docs/why-v1-was-deprecated.md)
 
 ---
 
@@ -195,24 +150,29 @@ npm run test:all
 
 ## Deployed contracts (testnet)
 
-### v1 contracts (Pedersen)
+### Primitive contracts (canonical, used by v2)
 
 | Contract | Address |
 |----------|---------|
-| BabyJub.sol | 0x2c40513b343B70f2A0B7e6Ad6F997DDa819D6f07 |
-| ConfidentialTransferVerifier | 0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5 |
-| JanusToken.sol (NATIVE demo) | 0x53F49881A1132FF4F674D2c015e35D5B07Fa1F4A |
-| JanusFlow.cdc (v1.1.0) | 0x28fef3d1d6a12800 |
+| BabyJub.sol | `0x2c40513b343B70f2A0B7e6Ad6F997DDa819D6f07` |
+| ConfidentialTransferVerifier | `0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5` |
 
-### v2 contracts (ElGamal — RECOMMENDED)
+### v2 token contracts (current — RECOMMENDED)
 
 | Contract | Address |
 |----------|---------|
-| JanusTokenV2.sol | 0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D |
-| JanusFlowV2.cdc | 0x28fef3d1d6a12800 (contract: JanusFlowV2) |
-| BabyJub.sol (v2/lab) | 0x27139AFda7425f51F68D32e0A38b7D43BcB0f870 |
-| EncryptConsistencyVerifier | 0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C |
-| DecryptOpenVerifier | 0x3bB139B5404fD6b152813bC3532367AAa096638b |
+| JanusTokenV2.sol | `0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D` |
+| JanusFlowV2.cdc | `0x28fef3d1d6a12800` (contract: `JanusFlowV2`) |
+| BabyJub.sol (v2/lab) | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` |
+| EncryptConsistencyVerifier | `0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C` |
+| DecryptOpenVerifier | `0x3bB139B5404fD6b152813bC3532367AAa096638b` |
+
+### v1 contracts (historical — do not use for new development)
+
+| Contract | Address | Status |
+|----------|---------|--------|
+| JanusToken.sol (NATIVE demo) | `0x53F49881A1132FF4F674D2c015e35D5B07Fa1F4A` | **DEPRECATED** |
+| JanusFlow.cdc (v1.1.0) | `0x28fef3d1d6a12800` (contract: `JanusFlow`) | **DEPRECATED** |
 
 ---
 
