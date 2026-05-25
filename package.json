@@ -1,6 +1,6 @@
 {
   "name": "@openjanus/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Unified TypeScript SDK for OpenJanus privacy primitives on Flow — BabyJubJub, Pedersen, Groth16, JanusToken, JanusFlow, extensible module architecture",
   "author": "oydual3 <claucondor@gmail.com>",
   "license": "MIT",
@@ -38,6 +38,11 @@
       "import": "./dist/utils/index.js",
       "require": "./dist/utils/index.cjs",
       "types": "./dist/utils/index.d.ts"
+    },
+    "./tokens-v2": {
+      "import": "./dist/tokens-v2/index.js",
+      "require": "./dist/tokens-v2/index.cjs",
+      "types": "./dist/tokens-v2/index.d.ts"
     }
   },
   "scripts": {
@@ -75,7 +80,13 @@
     "privacy",
     "openjanus",
     "erc-7984",
-    "confidential-transfer"
+    "confidential-transfer",
+    "elgamal",
+    "janus-token-v2",
+    "janus-flow-v2",
+    "multi-sender-privacy",
+    "bsgs",
+    "encrypt-to-pubkey"
   ],
   "repository": {
     "type": "git",

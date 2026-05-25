@@ -8,6 +8,7 @@ export default defineConfig({
     "network/index": "src/network/index.ts",
     "crypto/index": "src/crypto/index.ts",
     "utils/index": "src/utils/index.ts",
+    "tokens-v2/index": "src/tokens-v2/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,

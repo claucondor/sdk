@@ -20,6 +20,8 @@
 // ---------------------------------------------------------------------------
 // Token operations — what most app code uses
 // ---------------------------------------------------------------------------
+
+// v1 (Pedersen-based) — maintained for backward compatibility
 export { JanusToken, JANUS_TOKEN_TESTNET } from "./tokens/janus-token";
 export {
   JanusFlow,
@@ -27,6 +29,19 @@ export {
   JANUS_FLOW_VERSION,
   JANUS_FLOW_PRIMITIVES,
 } from "./tokens/janus-flow";
+
+// v2 (ElGamal-based) — RECOMMENDED for new applications
+// Provides multi-sender privacy: recipients learn only the total, not per-sender amounts
+export {
+  JanusTokenV2,
+  JanusFlowV2,
+  JANUS_TOKEN_V2_TESTNET,
+  JANUS_FLOW_V2_CADENCE_ADDRESS,
+  JANUS_FLOW_V2_VERSION,
+  JANUS_V2_BABYJUB_ADDRESS,
+  ENCRYPT_CONSISTENCY_VERIFIER,
+  DECRYPT_OPEN_VERIFIER,
+} from "./tokens-v2";
 
 // ---------------------------------------------------------------------------
 // Crypto operations — for advanced app code and integrators
@@ -55,6 +70,7 @@ export type { FlowNetwork } from "./network";
 export * as primitives from "./primitives";
 export * as network from "./network";
 export * as utils from "./utils";
+export * as elgamal from "./primitives/babyjub"; // re-exported as elgamal for v2 users
 
 // ---------------------------------------------------------------------------
 // Shared types — import these for TypeScript type annotations
