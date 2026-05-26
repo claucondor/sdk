@@ -1,0 +1,50 @@
+{
+  "version": "0.2.0",
+  "deployedAt": "2026-05-26T00:00:00.000Z",
+  "network": "flow-testnet",
+  "chainId": {
+    "evm": 545,
+    "cadence": "testnet"
+  },
+  "ceremony": {
+    "phase1": "Hermez pot14 (200+ contributors, multi-party)",
+    "beacon": "Flow testnet block 323555648",
+    "beaconHash": "30f1f68eed7ea6e7b4964e798ff8a0e2b77e7ca073ed80ac44d39ddc5fb395e7",
+    "encryptZkeyHash": "17ab9353f2966336bbf380549a47721ccce4283f20000380e18ecab763c3da16",
+    "decryptZkeyHash": "d87eda3b96f2eeab11f33583369519d041d25915cdbd49cedf41fd269b8e0745"
+  },
+  "addresses": {
+    "JANUS_FLOW_CADENCE": "0x28fef3d1d6a12800",
+    "JANUS_TOKEN_EVM": "0xb12E600fFcde967210cFD81CF9f32bBB6e68a499",
+    "ENCRYPT_CONSISTENCY_VERIFIER": "0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e",
+    "DECRYPT_OPEN_VERIFIER": "0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc",
+    "BABYJUB_LIBRARY": "0x27139AFda7425f51F68D32e0A38b7D43BcB0f870"
+  },
+  "deployTxHashes": {
+    "encryptVerifierDeploy": "756fb51756372a29111d4926e882267521746621e0889b04fda67c29f9839b38",
+    "decryptVerifierDeploy": "c72c0f0e9579e4b25e66ff1ccbb42ab9833785a45b87c14b3014e5b9dbf68ed8",
+    "janusTokenDeploy": "e477d1f0a6d61ad05aef86429b13e67c4cc07810925000f93b7c56d0e8505842",
+    "janusFlowRemove": "BLOCKED_protocol_restriction_contract_removal_requires_service_account",
+    "janusFlowAdd": "N/A_see_notes"
+  },
+  "deprecated": {
+    "ENCRYPT_VERIFIER_OLD": "0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C",
+    "DECRYPT_VERIFIER_OLD": "0x3bB139B5404fD6b152813bC3532367AAa096638b",
+    "JANUS_TOKEN_OLD": "0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D"
+  },
+  "e2eTestResult": {
+    "totalTests": 27,
+    "passed": 27,
+    "failed": 0,
+    "runDate": "2026-05-26",
+    "runtime_seconds": 419.4,
+    "verdict": "GO",
+    "privacyVerdict": "PASS",
+    "note": "27 assertions (exceeds 24 minimum); BSGS range 2^20 for lab; all fraud cases rejected"
+  },
+  "notes": {
+    "janusFlow_cadence_update": "BLOCKED: Flow testnet contract removal requires FlowServiceAccount authorization. On-chain JanusFlow at 0x28fef3d1d6a12800 is architecturally v1.1.0 (Pedersen commitments, different from local ElGamal accumulator version). E2E test validates EVM layer (JanusToken + verifiers) directly via COA — does not depend on JanusFlow Cadence wrapper.",
+    "circuit_compatibility": "New ceremony zkeys (Hermez + Flow VRF beacon) are compatible with existing WASM circuits — same constraint count (6 public signals encrypt_consistency, 7 decrypt_open). Only proving key delta changed.",
+    "coa_path": "Openjanus deployer COA is at /storage/openjanusCOA (not /storage/evm)"
+  }
+}
