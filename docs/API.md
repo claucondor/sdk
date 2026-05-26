@@ -67,7 +67,8 @@ const JANUS_TOKEN_TESTNET: TokenOptions; // 0x53F49881A1132FF4F674D2c015e35D5B07
 
 ## JanusFlow
 
-Cadence-native FLOW wrapper SDK (v1.1.0).
+Cadence-native FLOW wrapper SDK — router/impl pattern (v0.2.0-router).
+Canonical address: `0xbef3c77681c15397`. DEPRECATED zombie: `0x28fef3d1d6a12800` (DO NOT USE).
 
 ```typescript
 class JanusFlow {
@@ -75,16 +76,27 @@ class JanusFlow {
   configure(): Promise<this>;
 
   // Read
-  getCommitment(userAddress: string): Promise<CommitmentXY>;
+  getSlot(userAddress: string): Promise<Ciphertext>;
+  getPubkey(userAddress: string): Promise<Point>;
+  isPaused(): Promise<boolean>;
+  getActiveImplVersion(): Promise<string>;
 
   // Write (require FCL authz)
-  wrap(amount: string, amountRaw: bigint, blinding: bigint, authz): Promise<{txId, commitment}>;
-  confidentialTransfer(recipient: string, proofInput: TransferProofInput, authz): Promise<{txId, proofResult}>;
-  unwrap(amount: string, amountRaw: bigint, blinding: bigint, recipient: string, authz): Promise<{txId, commitment}>;
+  registerPubkey(pk: Point, authz): Promise<{txId}>;
+  wrapAndEncrypt(amount: string, recipient: string, proofResult: EncryptProofResult, authz): Promise<{txId, ciphertext}>;
+  confidentialTransfer(recipient: string, proofResult: EncryptProofResult, authz): Promise<{txId, ciphertext}>;
+  decryptAndUnwrap(amount: string, to: string, proofResult: DecryptProofResult, authz): Promise<{txId, amount}>;
+
+  // Admin (require AdminResource at /storage/janusFlowAdmin)
+  pause(authz): Promise<{txId}>;
+  unpause(authz): Promise<{txId}>;
+  finalizeImplSwap(authz): Promise<{txId}>;
+  cancelImplSwap(authz): Promise<{txId}>;
 }
 
-const JANUS_FLOW_CADENCE_ADDRESS = "0x28fef3d1d6a12800";
-const JANUS_FLOW_VERSION = "1.1.0";
+const JANUS_FLOW_CADENCE_ADDRESS = "0xbef3c77681c15397"; // canonical router
+const JANUS_FLOW_CADENCE_ADDRESS_LEGACY = "0x28fef3d1d6a12800"; // @deprecated zombie
+const JANUS_FLOW_VERSION = "0.2.0-router";
 ```
 
 ---

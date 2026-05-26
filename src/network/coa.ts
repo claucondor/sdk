@@ -5,11 +5,15 @@
  * Cross-VM transactions (Cadence → EVM) use the COA as the msg.sender.
  *
  * Known COA mappings (Flow EVM testnet):
- *   Alice (lab)  0x7599043aea001283  → 0x000000000000000000000002b7557ee5d4a32d06
- *   Bob          0xd807a3992d7be612  → 0x00000000000000000000000250d93efba617e0bf
- *   Charlie      0x3c601a443c81e6cd  → 0x00000000000000000000000249065458581f9bf0
- *   Dave         0xd32d9100e1fe983b  → 0x0000000000000000000000027b94cfc8a64971cd
- *   openjanus    0x28fef3d1d6a12800  → 0x0000000000000000000000027eb18dc34b9966fd
+ *   Alice (lab)         0x7599043aea001283  → 0x000000000000000000000002b7557ee5d4a32d06
+ *   Bob                 0xd807a3992d7be612  → 0x00000000000000000000000250d93efba617e0bf
+ *   Charlie             0x3c601a443c81e6cd  → 0x00000000000000000000000249065458581f9bf0
+ *   Dave                0xd32d9100e1fe983b  → 0x0000000000000000000000027b94cfc8a64971cd
+ *   openjanus legacy    0x28fef3d1d6a12800  → 0x0000000000000000000000027eb18dc34b9966fd
+ *   openjanus router    0xbef3c77681c15397  → 0x0000000000000000000000022f6b30af48a94787
+ *
+ * Note: "openjanus router" is the canonical JanusFlow account (v0.2.0-router).
+ * "openjanus legacy" holds the deprecated zombie JanusFlow v1 (Pedersen).
  */
 
 import type { FlowNetwork } from "./flow-client";
@@ -22,7 +26,8 @@ export const KNOWN_COAS: Record<string, string> = {
   "0x3c601a443c81e6cd": "0x00000000000000000000000249065458581f9bf0", // Charlie
   "0xd32d9100e1fe983b": "0x0000000000000000000000027b94cfc8a64971cd", // Dave
   "0x374a28ddf00498e4": "0x0000000000000000000000027eb18dc34b9966fd", // Eve (placeholder)
-  "0x28fef3d1d6a12800": "0x0000000000000000000000027eb18dc34b9966fd", // openjanus
+  "0x28fef3d1d6a12800": "0x0000000000000000000000027eb18dc34b9966fd", // openjanus legacy (zombie JanusFlow v1)
+  "0xbef3c77681c15397": "0x0000000000000000000000022f6b30af48a94787", // openjanus router (canonical JanusFlow v0.2.0-router)
 };
 
 /**
