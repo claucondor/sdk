@@ -1,22 +1,39 @@
 /**
- * tokens/janus-flow.ts — JanusFlow Cadence wrapper SDK (ElGamal edition)
+ * tokens/janus-flow.ts — JanusFlow Cadence wrapper SDK (router/impl pattern, v0.2.0-router)
  *
  * JanusFlow wraps Cadence FLOW tokens into ElGamal-encrypted slots.
  * Cross-VM: Cadence transactions call JanusToken on Flow EVM via COA.
  *
- * Deployed contract:
- *   Cadence: 0x28fef3d1d6a12800 — contract name "JanusFlow"
+ * Deployed contract (canonical — router/impl pattern):
+ *   Cadence: 0xbef3c77681c15397 — contract name "JanusFlow"
+ *   Router deploy TX: 8d99b1c5610feee73f4361f13ea504a8bb911f4973ea3ead20b8ec9259cb3962
+ *   Impl deploy TX:   f246c5a820523c27f7fbe01970f1f6f26855c6286001d98fc08a2b611976b3cb
  *
- * Privacy property (from Phase 3 24/24 PASS):
+ * DEPRECATED — DO NOT USE:
+ *   0x28fef3d1d6a12800.JanusFlow — legacy v1 Pedersen zombie, cannot be removed.
+ *
+ * Privacy property (from Phase 3 24/24 PASS + router e2e 25/25 PASS):
  *   Multiple senders encrypt amounts to the same recipient pubkey.
  *   Recipient decrypts accumulated total without learning per-sender amounts.
  *   On-chain state reveals only that transfers happened, not how much.
  *
- * Architecture:
- *   JanusFlow uses ElGamal ciphertexts (c1=r*G, c2=m*G+r*PK) for multi-sender support.
- *   Any sender can encrypt to any registered recipient PK without needing to coordinate
- *   or share blinding factors. Recipients decrypt their accumulated slot with their
- *   secret key + BSGS DLOG solver.
+ * Architecture — Router/Impl pattern (v0.2.0-router):
+ *   JanusFlow (router) — public canonical address, holds custody (FLOW vault +
+ *     commitments + pubkeys), never moves. Exposes pause/unpause + impl-swap admin.
+ *   JanusFlowImpl — pure stateless logic, swappable via 48h time-locked capability swap.
+ *   IJanusFlowImpl — interface contract that all impls must conform to.
+ *
+ *   Apps import JanusFlow from 0xbef3c77681c15397 forever. Impl upgrades are
+ *   transparent — custody stays in the router, public API is stable.
+ *
+ *   Upgrade flow:
+ *     1. Admin proposes new impl: proposeImplSwap(newImplCapability)
+ *     2. 48h time-lock starts — apps can react/migrate/object
+ *     3. Admin calls finalizeImplSwap() — capability swap, apps unchanged
+ *
+ *   ElGamal ciphertexts (c1=r*G, c2=m*G+r*PK) for multi-sender support.
+ *   Any sender can encrypt to any registered recipient PK without coordination.
+ *   Recipients decrypt their accumulated slot with their secret key + BSGS DLOG solver.
  */
 
 import type { Point } from "../types/commitment";
@@ -28,9 +45,17 @@ import type { Ciphertext, EncryptProofResult, DecryptProofResult } from "./types
 // Deployment info
 // ---------------------------------------------------------------------------
 
-export const JANUS_FLOW_CADENCE_ADDRESS = "0x28fef3d1d6a12800";
+/** Canonical JanusFlow Cadence address — router/impl pattern, v0.2.0-router. */
+export const JANUS_FLOW_CADENCE_ADDRESS = "0xbef3c77681c15397";
 export const JANUS_FLOW_CONTRACT_NAME = "JanusFlow";
-export const JANUS_FLOW_VERSION = "0.2.0";
+export const JANUS_FLOW_VERSION = "0.2.0-router";
+
+/**
+ * Legacy address — zombie v1 Pedersen contract. Cannot be removed (Flow restriction).
+ * DO NOT USE — import from JANUS_FLOW_CADENCE_ADDRESS instead.
+ * @deprecated
+ */
+export const JANUS_FLOW_CADENCE_ADDRESS_LEGACY = "0x28fef3d1d6a12800";
 
 /**
  * EVM address of the current JanusToken deployment (v0.2.0, ceremony-backed).
@@ -44,7 +69,7 @@ export const JANUS_FLOW_EVM_ADDRESS = "0xb12E600fFcde967210cFD81CF9f32bBB6e68a49
 
 /** Cadence tx: register BabyJubJub pubkey (one-time setup per account) */
 export const TX_REGISTER_PUBKEY = `
-import JanusFlow from 0x28fef3d1d6a12800
+import JanusFlow from 0xbef3c77681c15397
 
 transaction(pkx: UInt256, pky: UInt256) {
     prepare(signer: auth(BorrowValue) &Account) {}
@@ -56,7 +81,7 @@ transaction(pkx: UInt256, pky: UInt256) {
 
 /** Cadence tx: wrap FLOW and encrypt amount to a recipient's pubkey */
 export const TX_WRAP_AND_ENCRYPT = `
-import JanusFlow from 0x28fef3d1d6a12800
+import JanusFlow from 0xbef3c77681c15397
 import FungibleToken from 0x9a0766d93b6608b7
 import FlowToken from 0x7e60df042a9c0868
 
@@ -92,7 +117,7 @@ transaction(
 
 /** Cadence tx: confidential transfer between two registered accounts */
 export const TX_CONFIDENTIAL_TRANSFER = `
-import JanusFlow from 0x28fef3d1d6a12800
+import JanusFlow from 0xbef3c77681c15397
 
 transaction(
     recipient: Address,
@@ -116,7 +141,7 @@ transaction(
 
 /** Cadence tx: decrypt accumulated slot and unwrap FLOW to recipient */
 export const TX_DECRYPT_AND_UNWRAP = `
-import JanusFlow from 0x28fef3d1d6a12800
+import JanusFlow from 0xbef3c77681c15397
 import FungibleToken from 0x9a0766d93b6608b7
 import FlowToken from 0x7e60df042a9c0868
 
@@ -144,7 +169,7 @@ transaction(
 
 /** Cadence script: read a user's encrypted slot */
 export const SCRIPT_GET_SLOT = `
-import JanusFlow from 0x28fef3d1d6a12800
+import JanusFlow from 0xbef3c77681c15397
 
 access(all) fun main(user: Address): {String: UInt256} {
     return JanusFlow.getSlot(user: user)
@@ -153,10 +178,117 @@ access(all) fun main(user: Address): {String: UInt256} {
 
 /** Cadence script: read a user's registered pubkey */
 export const SCRIPT_GET_PUBKEY = `
-import JanusFlow from 0x28fef3d1d6a12800
+import JanusFlow from 0xbef3c77681c15397
 
 access(all) fun main(user: Address): {String: UInt256} {
     return JanusFlow.getPubkey(user: user)
+}
+`;
+
+/** Cadence script: check whether the router is paused */
+export const SCRIPT_IS_PAUSED = `
+import JanusFlow from 0xbef3c77681c15397
+
+access(all) fun main(): Bool {
+    return JanusFlow.isPaused()
+}
+`;
+
+/** Cadence script: get the version string of the currently active impl */
+export const SCRIPT_GET_ACTIVE_IMPL_VERSION = `
+import JanusFlow from 0xbef3c77681c15397
+
+access(all) fun main(): String {
+    return JanusFlow.getActiveImplVersion()
+}
+`;
+
+// ---------------------------------------------------------------------------
+// Admin Cadence transaction templates
+// Admin operations require the AdminResource capability stored at
+// /storage/janusFlowAdmin on the JanusFlow account (0xbef3c77681c15397).
+// ---------------------------------------------------------------------------
+
+/** Cadence tx (admin): pause the JanusFlow router — emergency stop */
+export const TX_ADMIN_PAUSE = `
+import JanusFlow from 0xbef3c77681c15397
+
+transaction {
+    prepare(admin: auth(BorrowValue) &Account) {
+        let adminRef = admin.storage.borrow<&JanusFlow.AdminResource>(
+            from: /storage/janusFlowAdmin
+        ) ?? panic("No AdminResource in signer storage")
+        adminRef.pause()
+    }
+}
+`;
+
+/** Cadence tx (admin): unpause the JanusFlow router */
+export const TX_ADMIN_UNPAUSE = `
+import JanusFlow from 0xbef3c77681c15397
+
+transaction {
+    prepare(admin: auth(BorrowValue) &Account) {
+        let adminRef = admin.storage.borrow<&JanusFlow.AdminResource>(
+            from: /storage/janusFlowAdmin
+        ) ?? panic("No AdminResource in signer storage")
+        adminRef.unpause()
+    }
+}
+`;
+
+/**
+ * Cadence tx (admin): propose an impl swap.
+ * Starts the 48h (172800s) time-lock. newImplVersion is the version string
+ * of the incoming impl (used for on-chain tracking + events).
+ *
+ * NOTE: The capability itself must be passed as a Cadence argument.
+ * In practice, this transaction is constructed manually or via a custom
+ * admin script that already holds the newImpl Capability reference.
+ * This template is a reference; adapt as needed for your key-management setup.
+ */
+export const TX_ADMIN_PROPOSE_IMPL_SWAP = `
+import JanusFlow from 0xbef3c77681c15397
+import IJanusFlowImpl from 0xbef3c77681c15397
+
+transaction(newImplVersion: String) {
+    prepare(admin: auth(BorrowValue) &Account) {
+        let adminRef = admin.storage.borrow<&JanusFlow.AdminResource>(
+            from: /storage/janusFlowAdmin
+        ) ?? panic("No AdminResource in signer storage")
+        // Capability acquisition is app-specific — adapt this template
+        // with the concrete newImpl Capability<&IJanusFlowImpl.IImpl> reference.
+        // adminRef.proposeImplSwap(newImpl: newImplCap, newVersion: newImplVersion)
+        panic("Adapt this template: acquire the impl capability before calling proposeImplSwap")
+    }
+}
+`;
+
+/** Cadence tx (admin): finalize impl swap after 48h time-lock has expired */
+export const TX_ADMIN_FINALIZE_IMPL_SWAP = `
+import JanusFlow from 0xbef3c77681c15397
+
+transaction {
+    prepare(admin: auth(BorrowValue) &Account) {
+        let adminRef = admin.storage.borrow<&JanusFlow.AdminResource>(
+            from: /storage/janusFlowAdmin
+        ) ?? panic("No AdminResource in signer storage")
+        adminRef.finalizeImplSwap()
+    }
+}
+`;
+
+/** Cadence tx (admin): cancel a pending impl swap proposal */
+export const TX_ADMIN_CANCEL_IMPL_SWAP = `
+import JanusFlow from 0xbef3c77681c15397
+
+transaction {
+    prepare(admin: auth(BorrowValue) &Account) {
+        let adminRef = admin.storage.borrow<&JanusFlow.AdminResource>(
+            from: /storage/janusFlowAdmin
+        ) ?? panic("No AdminResource in signer storage")
+        adminRef.cancelImplSwap()
+    }
 }
 `;
 
@@ -171,29 +303,33 @@ export interface JanusFlowOptions {
 /**
  * JanusFlow SDK — Cadence wrapper class for JanusToken EVM operations.
  *
- * DEPLOYMENT NOTE (v0.2.0):
- * The on-chain Cadence contract at JANUS_FLOW_CADENCE_ADDRESS (0x28fef3d1d6a12800)
- * is currently legacy v1 code (Pedersen-based commitments) due to a Flow protocol
- * restriction on contract removal. The Cadence update-with-remove requires
- * FlowServiceAccount authorization which is not available in testnet.
+ * Canonical address: 0xbef3c77681c15397 (router/impl pattern, v0.2.0-router).
+ * 25/25 e2e tests pass on this address (2026-05-26).
  *
- * As a result, the methods of this class that call the Cadence contract
- * (wrapAndEncrypt, confidentialTransfer, decryptAndUnwrap, getSlot, getPubkey)
- * will fail against the legacy on-chain contract because the Cadence interface
- * does not match the ElGamal ABI.
+ * Router/impl architecture:
+ *   JanusFlow (router at canonical address) — public API + custody (FLOW vault +
+ *     commitments + pubkeys). Never moves. Exposes admin: pause/unpause + impl-swap.
+ *   JanusFlowImpl — current pure-logic impl. Swappable via 48h time-locked capability.
  *
- * RECOMMENDED FOR v0.2.0: Use JanusToken class directly with the user's COA
- * for all EVM-side interactions. This is the path proven by 27/27 Phase B e2e tests.
- * The JanusFlow Cadence wrapper redeploy is planned for v0.3.0 once the protocol
- * restriction is resolved.
+ * Admin operations (owner only, via AdminResource capability):
+ *   pause() / unpause()      — emergency stop; isPaused() is a public view
+ *   proposeImplSwap(cap)     — start 48h time-lock for impl upgrade
+ *   finalizeImplSwap()       — complete upgrade after time-lock expires
+ *   cancelImplSwap()         — abort a pending upgrade proposal
+ *   getActiveImplVersion()   — returns the version string of the current impl
  *
- * The Cadence transaction templates (TX_REGISTER_PUBKEY, TX_WRAP_AND_ENCRYPT, etc.)
- * are exported for reference and can be used once the wrapper is redeployed.
- *
- * See: https://github.com/openjanus/sdk#cadence-wrapper-status
+ * User-facing operations (any account):
+ *   registerPubkey(pk, authz)                          — one-time BabyJubJub key setup
+ *   wrapAndEncrypt(amount, recipient, proof, authz)    — wrap FLOW + encrypt
+ *   confidentialTransfer(recipient, proof, authz)      — slot-to-slot transfer
+ *   decryptAndUnwrap(amount, to, proof, authz)         — claim + unwrap FLOW
+ *   getSlot(userAddress)                               — read encrypted slot (view)
+ *   getPubkey(userAddress)                             — read registered pubkey (view)
  *
  * Operations execute as Cadence transactions (cross-VM: Cadence to EVM via COA).
  * Callers provide FCL-compatible authorization functions.
+ *
+ * @see https://github.com/openjanus/sdk/blob/main/docs/ARCHITECTURE.md
  */
 export class JanusFlow {
   private readonly network: FlowNetwork;
@@ -463,5 +599,128 @@ export class JanusFlow {
 
     await fcl.tx(txId).onceSealed();
     return { txId, amount: proofResult.amount };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin: pause / unpause
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Check whether the JanusFlow router is currently paused.
+   * Paused = all user-facing write operations revert. Read operations still work.
+   *
+   * @returns true if paused, false if active
+   */
+  async isPaused(): Promise<boolean> {
+    const fcl = await import("@onflow/fcl");
+    return fcl.query({ cadence: SCRIPT_IS_PAUSED, args: () => [] }) as Promise<boolean>;
+  }
+
+  /**
+   * (Admin only) Pause the JanusFlow router — emergency stop.
+   * Caller must hold the AdminResource at /storage/janusFlowAdmin.
+   *
+   * @param authz FCL authorization function for the admin account
+   */
+  async pause(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    authz: any
+  ): Promise<{ txId: string }> {
+    const fcl = await import("@onflow/fcl");
+    const txId = await fcl.mutate({
+      cadence: TX_ADMIN_PAUSE,
+      args: () => [],
+      proposer: authz,
+      payer: authz,
+      authorizations: [authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txId };
+  }
+
+  /**
+   * (Admin only) Unpause the JanusFlow router.
+   * Caller must hold the AdminResource at /storage/janusFlowAdmin.
+   *
+   * @param authz FCL authorization function for the admin account
+   */
+  async unpause(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    authz: any
+  ): Promise<{ txId: string }> {
+    const fcl = await import("@onflow/fcl");
+    const txId = await fcl.mutate({
+      cadence: TX_ADMIN_UNPAUSE,
+      args: () => [],
+      proposer: authz,
+      payer: authz,
+      authorizations: [authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txId };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Admin: impl swap (48h time-lock)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get the version string of the currently active JanusFlowImpl.
+   * Returns a semver-like string (e.g. "0.1.0") as set by the impl contract.
+   */
+  async getActiveImplVersion(): Promise<string> {
+    const fcl = await import("@onflow/fcl");
+    return fcl.query({
+      cadence: SCRIPT_GET_ACTIVE_IMPL_VERSION,
+      args: () => [],
+    }) as Promise<string>;
+  }
+
+  /**
+   * (Admin only) Finalize a pending impl swap after the 48h time-lock has expired.
+   * Call proposeImplSwap on-chain first (via TX_ADMIN_PROPOSE_IMPL_SWAP template).
+   * After 48h, call this method to complete the capability swap.
+   *
+   * @param authz FCL authorization function for the admin account
+   */
+  async finalizeImplSwap(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    authz: any
+  ): Promise<{ txId: string }> {
+    const fcl = await import("@onflow/fcl");
+    const txId = await fcl.mutate({
+      cadence: TX_ADMIN_FINALIZE_IMPL_SWAP,
+      args: () => [],
+      proposer: authz,
+      payer: authz,
+      authorizations: [authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txId };
+  }
+
+  /**
+   * (Admin only) Cancel a pending impl swap proposal before it is finalized.
+   *
+   * @param authz FCL authorization function for the admin account
+   */
+  async cancelImplSwap(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    authz: any
+  ): Promise<{ txId: string }> {
+    const fcl = await import("@onflow/fcl");
+    const txId = await fcl.mutate({
+      cadence: TX_ADMIN_CANCEL_IMPL_SWAP,
+      args: () => [],
+      proposer: authz,
+      payer: authz,
+      authorizations: [authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txId };
   }
 }
