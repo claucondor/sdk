@@ -44,8 +44,21 @@ export {
   generateBlinding,
   decryptBalance,
   buildTransferProof,
+  // ElGamal proof builders (v0.2.0) — Groth16 provers for encrypt/decrypt circuits
+  buildEncryptProof,
+  buildDecryptProof,
 } from "./crypto";
-export type { TransferProofInput, TransferProofResult } from "./crypto";
+export type {
+  TransferProofInput,
+  TransferProofResult,
+  // ElGamal proof types (v0.2.0)
+  ElGamalCiphertext,
+  EncryptProofInput,
+  EncryptProofResult,
+  DecryptProofInput,
+  DecryptProofResult,
+  ProofArtifactOptions,
+} from "./crypto";
 
 // ---------------------------------------------------------------------------
 // Network helpers

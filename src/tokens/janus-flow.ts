@@ -30,9 +30,13 @@ import type { Ciphertext, EncryptProofResult, DecryptProofResult } from "./types
 
 export const JANUS_FLOW_CADENCE_ADDRESS = "0x28fef3d1d6a12800";
 export const JANUS_FLOW_CONTRACT_NAME = "JanusFlow";
-export const JANUS_FLOW_VERSION = "0.1.0";
+export const JANUS_FLOW_VERSION = "0.2.0";
 
-export const JANUS_FLOW_EVM_ADDRESS = "0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D";
+/**
+ * EVM address of the current JanusToken deployment (v0.2.0, ceremony-backed).
+ * Use JanusToken class with this address for EVM-direct flows.
+ */
+export const JANUS_FLOW_EVM_ADDRESS = "0xb12E600fFcde967210cFD81CF9f32bBB6e68a499";
 
 // ---------------------------------------------------------------------------
 // Cadence transaction strings — JanusFlow
@@ -165,11 +169,31 @@ export interface JanusFlowOptions {
 }
 
 /**
- * JanusFlow SDK — ElGamal-based confidential FLOW wrapping via Cadence.
+ * JanusFlow SDK — Cadence wrapper class for JanusToken EVM operations.
  *
- * Operations execute as Cadence transactions (cross-VM: Cadence → EVM via COA).
+ * DEPLOYMENT NOTE (v0.2.0):
+ * The on-chain Cadence contract at JANUS_FLOW_CADENCE_ADDRESS (0x28fef3d1d6a12800)
+ * is currently legacy v1 code (Pedersen-based commitments) due to a Flow protocol
+ * restriction on contract removal. The Cadence update-with-remove requires
+ * FlowServiceAccount authorization which is not available in testnet.
+ *
+ * As a result, the methods of this class that call the Cadence contract
+ * (wrapAndEncrypt, confidentialTransfer, decryptAndUnwrap, getSlot, getPubkey)
+ * will fail against the legacy on-chain contract because the Cadence interface
+ * does not match the ElGamal ABI.
+ *
+ * RECOMMENDED FOR v0.2.0: Use JanusToken class directly with the user's COA
+ * for all EVM-side interactions. This is the path proven by 27/27 Phase B e2e tests.
+ * The JanusFlow Cadence wrapper redeploy is planned for v0.3.0 once the protocol
+ * restriction is resolved.
+ *
+ * The Cadence transaction templates (TX_REGISTER_PUBKEY, TX_WRAP_AND_ENCRYPT, etc.)
+ * are exported for reference and can be used once the wrapper is redeployed.
+ *
+ * See: https://github.com/openjanus/sdk#cadence-wrapper-status
+ *
+ * Operations execute as Cadence transactions (cross-VM: Cadence to EVM via COA).
  * Callers provide FCL-compatible authorization functions.
- *
  */
 export class JanusFlow {
   private readonly network: FlowNetwork;

@@ -11,9 +11,14 @@
  *   Bob decrypts accumulated slot → 42.
  *   Bob cannot learn individual sender amounts from the on-chain state.
  *
- * Canonical testnet deployment:
- *   EVM:  0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D  (JanusToken)
- *   BabyJub.sol: 0x27139AFda7425f51F68D32e0A38b7D43BcB0f870
+ * Canonical testnet deployment (v0.2.0 — ceremony-backed):
+ *   EVM:  0xb12E600fFcde967210cFD81CF9f32bBB6e68a499  (JanusToken)
+ *   BabyJub.sol: 0x27139AFda7425f51F68D32e0A38b7D43BcB0f870  (unchanged)
+ *   EncryptConsistencyVerifier: 0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e
+ *   DecryptOpenVerifier:        0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc
+ *
+ * DEPRECATED (v0.1.0 — single-contributor zkeys, do not use):
+ *   JanusToken:               0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D
  *   EncryptConsistencyVerifier: 0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C
  *   DecryptOpenVerifier:        0x3bB139B5404fD6b152813bC3532367AAa096638b
  *
@@ -44,18 +49,27 @@ import { NETWORK_CONFIG } from "../network/flow-client";
 // Canonical deployment addresses
 // ---------------------------------------------------------------------------
 
-/** BabyJub.sol address (lab/stateless deployment, re-used from primitives) */
+/** BabyJub.sol address (lab/stateless deployment, re-used from primitives — unchanged) */
 export const JANUS_BABYJUB_ADDRESS = "0x27139AFda7425f51F68D32e0A38b7D43BcB0f870";
 
-/** EncryptConsistencyVerifier — proves ciphertext encrypts m to PK */
-export const ENCRYPT_CONSISTENCY_VERIFIER = "0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C";
+/**
+ * EncryptConsistencyVerifier — proves ciphertext encrypts m to PK.
+ * v0.2.0: ceremony-backed (Hermez phase 1 + Flow VRF beacon block 323555648).
+ */
+export const ENCRYPT_CONSISTENCY_VERIFIER = "0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e";
 
-/** DecryptOpenVerifier — proves knowledge of sk for correct decryption */
-export const DECRYPT_OPEN_VERIFIER = "0x3bB139B5404fD6b152813bC3532367AAa096638b";
+/**
+ * DecryptOpenVerifier — proves knowledge of sk for correct decryption.
+ * v0.2.0: ceremony-backed (Hermez phase 1 + Flow VRF beacon block 323555648).
+ */
+export const DECRYPT_OPEN_VERIFIER = "0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc";
 
-/** Canonical testnet deployment options */
+/**
+ * Canonical testnet deployment options (v0.2.0 — ceremony-backed verifiers).
+ * e2e validated: 27/27 tests pass (2026-05-26).
+ */
 export const JANUS_TOKEN_TESTNET: TokenOptions = {
-  evmAddress: "0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D",
+  evmAddress: "0xb12E600fFcde967210cFD81CF9f32bBB6e68a499",
   network: "testnet",
   babyJubAddress: JANUS_BABYJUB_ADDRESS,
   encryptVerifierAddress: ENCRYPT_CONSISTENCY_VERIFIER,

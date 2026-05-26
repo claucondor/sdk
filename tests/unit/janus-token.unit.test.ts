@@ -28,9 +28,9 @@ function isHexAddress(s: string): boolean {
 // ---------------------------------------------------------------------------
 
 describe("JANUS_TOKEN_TESTNET constant", () => {
-  it("has v2 EVM address", () => {
+  it("has v0.2.0 ceremony-backed EVM address", () => {
     expect(JANUS_TOKEN_TESTNET.evmAddress).toBe(
-      "0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D"
+      "0xb12E600fFcde967210cFD81CF9f32bBB6e68a499"
     );
   });
 
@@ -61,16 +61,16 @@ describe("Canonical v2 addresses", () => {
     expect(JANUS_BABYJUB_ADDRESS).toBe("0x27139AFda7425f51F68D32e0A38b7D43BcB0f870");
   });
 
-  it("ENCRYPT_CONSISTENCY_VERIFIER is valid hex address", () => {
+  it("ENCRYPT_CONSISTENCY_VERIFIER is valid hex address (v0.2.0 ceremony-backed)", () => {
     expect(isHexAddress(ENCRYPT_CONSISTENCY_VERIFIER)).toBe(true);
     expect(ENCRYPT_CONSISTENCY_VERIFIER).toBe(
-      "0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C"
+      "0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e"
     );
   });
 
-  it("DECRYPT_OPEN_VERIFIER is valid hex address", () => {
+  it("DECRYPT_OPEN_VERIFIER is valid hex address (v0.2.0 ceremony-backed)", () => {
     expect(isHexAddress(DECRYPT_OPEN_VERIFIER)).toBe(true);
-    expect(DECRYPT_OPEN_VERIFIER).toBe("0x3bB139B5404fD6b152813bC3532367AAa096638b");
+    expect(DECRYPT_OPEN_VERIFIER).toBe("0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc");
   });
 
   it("all three addresses are distinct", () => {
