@@ -103,16 +103,118 @@ Every code path that submits a proof to an EVM verifier applies the Fp2 swap
 via `applyPiBSwap()`. Application code never needs to think about this.
 The raw `SnarkJSProof` type is kept for local verification only.
 
+## Router Pattern — JanusFlow v0.2.0+
+
+JanusFlow Cadence wrapper uses a router/facade + swappable implementation pattern,
+deployed at a new canonical account `0xbef3c77681c15397` (openjanus secondary account).
+
+### Contracts at 0xbef3c77681c15397
+
+| Contract | Role | Notes |
+|----------|------|-------|
+| `JanusFlow` | Router + custody | Public canonical contract — stable forever |
+| `JanusFlowImpl` | Current impl | Pure stateless logic, swappable |
+| `IJanusFlowImpl` | Impl interface | All future impls must conform |
+
+### Architecture rationale
+
+- `JanusFlow` (router): holds the FLOW vault, commitments map, and pubkeys map.
+  Exposes the public API (registerPubkey, wrapAndEncrypt, confidentialTransfer,
+  decryptAndUnwrap, getSlot, getPubkey) plus admin operations (pause, impl-swap).
+  **This address is what apps import. It never changes.**
+
+- `JanusFlowImpl` (current impl): pure logic — validates proofs, computes slot updates,
+  returns results. No state. Receives data from the router, returns computed values.
+  The router stores all state. The impl is disposable.
+
+- `IJanusFlowImpl` (interface): the interface contract that all future implementations
+  must conform to. Decouples the router from concrete impl details.
+
+### Upgrade flow
+
+1. Admin proposes new impl via `proposeImplSwap(newImplCapability)`.
+   The 48h (172800s) time-lock starts. An on-chain event is emitted.
+2. Apps observe the event and have 48h to review, test, or object.
+3. After 48h, admin calls `finalizeImplSwap()`. The router swaps the impl capability.
+   Apps are completely transparent to this — they import JanusFlow at the same address.
+4. If the admin wants to abort before 48h, `cancelImplSwap()` resets the pending state.
+
+### Custody guarantee
+
+The FLOW vault, commitments, and pubkeys all live in the router contract forever.
+**No funds move during an impl swap.** This is the key safety property:
+users can always unwrap their FLOW even if the impl is swapped, because the vault
+is in the router, not in the impl.
+
+### Admin capability pattern
+
+The `AdminResource` is stored at `/storage/janusFlowAdmin` on the contract account
+(`0xbef3c77681c15397`). Only the holder of this resource can:
+- pause / unpause the contract
+- propose, finalize, or cancel impl swaps
+
+For production, the AdminResource should be held by a multi-sig account.
+
+### Emergency stop
+
+`pause()` halts all write operations (wrapAndEncrypt, confidentialTransfer,
+decryptAndUnwrap, registerPubkey). Read operations (getSlot, getPubkey, isPaused)
+remain active. `unpause()` restores normal operation.
+
+### SDK integration
+
+```typescript
+import { JanusFlow, JANUS_FLOW_CADENCE_ADDRESS } from "@openjanus/sdk/tokens";
+
+const sdk = new JanusFlow({ network: "testnet" });
+await sdk.configure();
+
+// Check if paused before operations
+const paused = await sdk.isPaused();
+
+// Admin: pause
+await sdk.pause(adminAuthz);
+
+// Admin: unpause
+await sdk.unpause(adminAuthz);
+
+// Check current impl version
+const version = await sdk.getActiveImplVersion(); // e.g. "0.1.0"
+
+// Admin: finalize impl swap (after 48h from proposeImplSwap on-chain)
+await sdk.finalizeImplSwap(adminAuthz);
+
+// Admin: cancel pending impl swap proposal
+await sdk.cancelImplSwap(adminAuthz);
+```
+
+### Why a new account (not an update to the old one)?
+
+The legacy JanusFlow at `0x28fef3d1d6a12800` cannot be removed or replaced with
+incompatible code without `FlowServiceAccount` authorization, which is not available
+on testnet without special access. Deploying to a new account is the correct
+production-grade approach — it also forces a clean address separation between the
+legacy zombie and the new canonical contract.
+
 ## Deployed contracts (testnet)
+
+### v0.2.0-router (canonical)
 
 | Contract | Address | Notes |
 |----------|---------|-------|
-| BabyJub.sol | 0x2c40513b343B70f2A0B7e6Ad6F997DDa819D6f07 | Stateless, reuse |
-| ConfidentialTransferVerifier | 0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5 | Groth16 verifier |
-| JanusToken.sol (demo, NATIVE) | 0x53F49881A1132FF4F674D2c015e35D5B07Fa1F4A | ERC-7984 |
-| JanusToken.cdc | 0x28fef3d1d6a12800 (JanusToken) | Cadence contract |
-| JanusFlow.cdc | 0x28fef3d1d6a12800 (JanusFlow v1.1.0) | FLOW wrapper |
-| PedersenBabyJub.cdc | 0x28fef3d1d6a12800 | Cadence Pedersen |
+| JanusFlow.cdc (router) | `0xbef3c77681c15397` | Canonical — stable forever |
+| JanusFlowImpl.cdc | `0xbef3c77681c15397` | Current impl |
+| IJanusFlowImpl.cdc | `0xbef3c77681c15397` | Impl interface |
+| JanusToken.sol | `0xb12E600fFcde967210cFD81CF9f32bBB6e68a499` | EVM accumulator |
+| EncryptConsistencyVerifier | `0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e` | Groth16 verifier |
+| DecryptOpenVerifier | `0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc` | Groth16 verifier |
+| BabyJub.sol | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` | Used by JanusToken |
+
+### Deprecated — zombie (DO NOT USE)
+
+| Contract | Address | Notes |
+|----------|---------|-------|
+| JanusFlow.cdc (v1 Pedersen) | `0x28fef3d1d6a12800` | Zombie — cannot be removed |
 
 ## Test strategy
 
