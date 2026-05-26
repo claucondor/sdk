@@ -40,6 +40,14 @@
       "types": "./dist/tokens/index.d.ts"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
@@ -47,7 +55,8 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "RUN_INTEGRATION=1 vitest run tests/integration",
     "test:all": "RUN_INTEGRATION=1 vitest run",
-    "test:watch": "vitest tests/unit"
+    "test:watch": "vitest tests/unit",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@onflow/fcl": "^1.13.0",
