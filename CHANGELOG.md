@@ -4,6 +4,42 @@ All notable changes to `@openjanus/sdk` are documented here.
 
 ---
 
+## [0.2.0-router] — 2026-05-26
+
+### Added
+
+- JanusFlow Cadence wrapper redeployed with router/impl pattern at new
+  canonical account `0xbef3c77681c15397` (openjanus secondary account)
+- Admin API on `JanusFlow` class:
+  - `pause()` / `unpause()` — emergency stop; `isPaused()` is a public view
+  - `finalizeImplSwap(authz)` / `cancelImplSwap(authz)` — 48h time-lock upgrade flow
+  - `getActiveImplVersion()` — returns the current impl version string
+- New Cadence transaction templates exported from `@openjanus/sdk/tokens`:
+  - `TX_ADMIN_PAUSE`, `TX_ADMIN_UNPAUSE`
+  - `TX_ADMIN_PROPOSE_IMPL_SWAP`, `TX_ADMIN_FINALIZE_IMPL_SWAP`, `TX_ADMIN_CANCEL_IMPL_SWAP`
+  - `SCRIPT_IS_PAUSED`, `SCRIPT_GET_ACTIVE_IMPL_VERSION`
+- `JANUS_FLOW_CADENCE_ADDRESS_LEGACY` constant (marked `@deprecated`) for the zombie address
+- `JANUS_TOKEN_EVM`, `ENCRYPT_VERIFIER_EVM`, `DECRYPT_VERIFIER_EVM` re-exported as
+  top-level constants from `@openjanus/sdk/tokens` for convenience
+- Router e2e: 25/25 scenarios pass on `0xbef3c77681c15397` (2026-05-26)
+- Deployment record: `circuits/setup/deployments-router.json`
+- Architecture documentation: `docs/ARCHITECTURE.md` router section
+
+### Changed
+
+- `JANUS_FLOW_CADENCE_ADDRESS`: `0x28fef3d1d6a12800` → `0xbef3c77681c15397`
+- `JANUS_FLOW_VERSION`: `"0.2.0"` → `"0.2.0-router"`
+- `JanusFlow` class JSDoc: removed "deferred / not functional" warning — router is live
+- All Cadence transaction templates updated to import from new canonical address
+- Future impl upgrades happen via capability swap — apps unchanged, custody stays in router
+
+### Deprecated
+
+- `0x28fef3d1d6a12800.JanusFlow` — legacy v1 Pedersen, zombie (Flow restriction on removal)
+  Exported as `JANUS_FLOW_CADENCE_ADDRESS_LEGACY`. Do not import. Use new canonical address.
+
+---
+
 ## [0.2.0] — 2026-05-26
 
 ### Added
