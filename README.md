@@ -88,18 +88,32 @@ npm run test:all
 
 ## Deployed contracts (testnet)
 
-### v0.2.0 — ceremony-backed (Hermez pot14 + Flow VRF beacon)
+### v0.2.0-router — router/impl pattern (2026-05-26)
 
-| Contract | Network | Address |
-|----------|---------|---------|
-| JanusToken.sol | Flow EVM testnet | `0xb12E600fFcde967210cFD81CF9f32bBB6e68a499` |
-| JanusFlow.cdc | Flow Cadence testnet | `0x28fef3d1d6a12800` (contract: `JanusFlow`, legacy v1 — deferred, see CHANGELOG) |
-| BabyJub.sol | Flow EVM testnet | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` |
-| EncryptConsistencyVerifier | Flow EVM testnet | `0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e` |
-| DecryptOpenVerifier | Flow EVM testnet | `0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc` |
+JanusFlow Cadence wrapper uses a router/facade with a swappable implementation.
+The canonical address (`0xbef3c77681c15397`) is stable forever. Impl upgrades happen
+via a 48h time-locked capability swap — apps are transparent to upgrades.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#router-pattern-janusflow-v020) for details.
+
+| Contract | Network | Address | Notes |
+|----------|---------|---------|-------|
+| JanusFlow.cdc | Flow Cadence testnet | `0xbef3c77681c15397` | Router — canonical forever |
+| JanusFlowImpl.cdc | Flow Cadence testnet | `0xbef3c77681c15397` | Current impl — swappable |
+| IJanusFlowImpl.cdc | Flow Cadence testnet | `0xbef3c77681c15397` | Impl interface |
+| JanusToken.sol | Flow EVM testnet | `0xb12E600fFcde967210cFD81CF9f32bBB6e68a499` | EVM accumulator |
+| BabyJub.sol | Flow EVM testnet | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` | Point arithmetic |
+| EncryptConsistencyVerifier | Flow EVM testnet | `0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e` | Groth16 |
+| DecryptOpenVerifier | Flow EVM testnet | `0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc` | Groth16 |
 
 Trusted setup: Hermez phase 1 (200+ contributors) + Flow VRF beacon (testnet block 323555648).
 SHA256 zkey hashes verifiable via `circuits/setup/` in package.
+Router e2e: 25/25 pass (2026-05-26). Full record: `circuits/setup/deployments-router.json`.
+
+### Deprecated — 0x28fef3d1d6a12800.JanusFlow (zombie, DO NOT USE)
+
+The old JanusFlow at `0x28fef3d1d6a12800` is legacy v1 Pedersen code. Flow's protocol
+restriction prevents contract removal without service account authorization. It is a zombie
+that cannot be updated or removed. All apps must import from `0xbef3c77681c15397` instead.
 
 ### Deprecated — v0.1.0 (single-contributor zkey, DO NOT USE)
 

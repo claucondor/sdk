@@ -1,11 +1,12 @@
 /**
  * Integration tests — JanusToken on Flow testnet (READ-ONLY).
  *
- * Tests the SDK against the canonical v2 deployment:
- *   JanusToken EVM: 0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D
- *   EncryptConsistencyVerifier: 0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C
- *   DecryptOpenVerifier:        0x3bB139B5404fD6b152813bC3532367AAa096638b
- *   BabyJub.sol: 0x27139AFda7425f51F68D32e0A38b7D43BcB0f870
+ * Tests the SDK against the canonical v0.2.0-router deployment:
+ *   JanusToken EVM:             0xb12E600fFcde967210cFD81CF9f32bBB6e68a499
+ *   EncryptConsistencyVerifier: 0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e
+ *   DecryptOpenVerifier:        0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc
+ *   BabyJub.sol:                0x27139AFda7425f51F68D32e0A38b7D43BcB0f870
+ *   JanusFlow Cadence (router): 0xbef3c77681c15397 (contract: JanusFlow)
  *   Network: Flow EVM testnet (chainId 545)
  *
  * These tests are READ-ONLY — no private key required.

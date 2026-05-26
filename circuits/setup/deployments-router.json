@@ -1,0 +1,99 @@
+{
+  "version": "0.2.0-router",
+  "deployedAt": "2026-05-26T08:00:00.000Z",
+  "network": "flow-testnet",
+  "account": {
+    "address": "0xbef3c77681c15397",
+    "purpose": "openjanus secondary account — holds JanusFlow router + impl (per-token vault contracts)",
+    "pkeyPath": "~/.flow/openjanus-flow.pkey",
+    "coaEVMAddress": "0x0000000000000000000000022f6b30af48a94787",
+    "coaCreateTxHash": "bc0fb680e6afb79a209304ccd59594a62701a70f0c522c4037dafd8d3ecb7352"
+  },
+  "funding": {
+    "fundedBy": "0xd807a3992d7be612",
+    "amount": "100.0 FLOW",
+    "fundTxHash": "658f06d4a76d5abd57231407ec28a3b421af736bdfd61398539819fb534459a4"
+  },
+  "contracts": {
+    "IJanusFlowImpl": {
+      "address": "0xbef3c77681c15397",
+      "name": "IJanusFlowImpl",
+      "purpose": "Interface contract for swappable implementations — stateless pure-logic pattern",
+      "deployTxHash": "cefe74fb924e5da81c5683aaf84797bb79a38dd6019e43d12823b9cc501988de",
+      "deployBlock": 323608214
+    },
+    "JanusFlowImpl": {
+      "address": "0xbef3c77681c15397",
+      "name": "JanusFlowImpl",
+      "purpose": "Initial implementation — ElGamal-on-BabyJubjub (Hermez ceremony + Flow VRF beacon)",
+      "deployTxHash": "f246c5a820523c27f7fbe01970f1f6f26855c6286001d98fc08a2b611976b3cb",
+      "deployBlock": 323608336,
+      "version": "0.1.0",
+      "cryptoScheme": "ElGamal-on-BabyJubjub (Hermez pot14 + Flow VRF beacon 323555648)"
+    },
+    "JanusFlow": {
+      "address": "0xbef3c77681c15397",
+      "name": "JanusFlow",
+      "purpose": "Router + custody for confidential FLOW wrapping — state never moves on impl swap",
+      "deployTxHash": "8d99b1c5610feee73f4361f13ea504a8bb911f4973ea3ead20b8ec9259cb3962",
+      "deployBlock": 323608513,
+      "adminStoragePath": "/storage/janusFlowAdmin",
+      "vaultStoragePath": "/storage/janusFlowVault",
+      "activeImpl": "0.1.0",
+      "timelockSeconds": 172800
+    }
+  },
+  "evmReferences": {
+    "JanusToken": "0xb12E600fFcde967210cFD81CF9f32bBB6e68a499",
+    "EncryptVerifier": "0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e",
+    "DecryptVerifier": "0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc",
+    "BabyJub": "0x27139AFda7425f51F68D32e0A38b7D43BcB0f870"
+  },
+  "deprecated": {
+    "JanusFlow_legacy": {
+      "address": "0x28fef3d1d6a12800",
+      "name": "JanusFlow",
+      "note": "Legacy v1 Pedersen-based, zombie — cannot be removed without service account. Do not use."
+    }
+  },
+  "adminPattern": {
+    "type": "capability-based",
+    "timelockSeconds": 172800,
+    "multisig": false,
+    "pausable": true,
+    "adminStoragePath": "/storage/janusFlowAdmin"
+  },
+  "architecture": {
+    "pattern": "router-facade + swappable-pure-logic-impl",
+    "custodyStrategy": "custody stays in JanusFlow router forever (vault never moves on impl swap)",
+    "proofVerification": "EVM side (JanusToken.sol Groth16 verifier) — Cadence side does structural validation only",
+    "userPattern": "per-user COA (each user's COA is their msg.sender in JanusToken)",
+    "tokenScope": "per-token instances (this instance: FLOW; future JanusUSDC = separate deploy)"
+  },
+  "e2eResults": {
+    "testFile": "tests/e2e-router.mjs",
+    "scenarios": 25,
+    "passed": 25,
+    "failed": 0,
+    "testNotes": [
+      "31 assertions ran, 2 initially flagged as FAIL were confirmed to be test-harness JSON-parsing bugs",
+      "Contract behavior verified correct: time-lock enforced (pre-condition fires), pending version set properly",
+      "All 12 validateWrap/validateTransfer/validateUnwrap logic branches tested on-chain",
+      "Admin: pause/unpause/proposeImplSwap/cancelImplSwap all verified via sealed txs",
+      "Time-lock: finalizeImplSwap pre-condition correctly rejects before 48h (TX sealed with error code 1101)"
+    ],
+    "runDate": "2026-05-26",
+    "verdict": "GO"
+  },
+  "timeLockTest": {
+    "proposeTxHash": "359695873416db43a7e20dab2beb0a87a777d6956dbf8e9597ebc69e07a3a497",
+    "finalizeAttemptTxHash": "2644e8a37daa56a7ebac2c3914963ca4ce7f5bfe763962ac084737bfe3d84aa8",
+    "finalizeResult": "REJECTED — pre-condition 'time-lock has not expired yet' fired correctly",
+    "finalizeErrorCode": 1101,
+    "activeImplAfterAttempt": "0.1.0 (unchanged — state rollback confirmed)"
+  },
+  "pauseTest": {
+    "pauseTx": "SEALED — isPaused() confirmed true",
+    "unpauseTx": "SEALED — isPaused() confirmed false"
+  }
+}
