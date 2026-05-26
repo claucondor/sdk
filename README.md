@@ -88,20 +88,24 @@ npm run test:all
 
 ## Deployed contracts (testnet)
 
-### Primitive contracts (canonical)
+### v0.2.0 — ceremony-backed (Hermez pot14 + Flow VRF beacon)
 
-| Contract | Address |
-|----------|---------|
-| BabyJub.sol | `0x2c40513b343B70f2A0B7e6Ad6F997DDa819D6f07` |
-| ConfidentialTransferVerifier | `0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5` |
+| Contract | Network | Address |
+|----------|---------|---------|
+| JanusToken.sol | Flow EVM testnet | `0xb12E600fFcde967210cFD81CF9f32bBB6e68a499` |
+| JanusFlow.cdc | Flow Cadence testnet | `0x28fef3d1d6a12800` (contract: `JanusFlow`, legacy v1 — deferred, see CHANGELOG) |
+| BabyJub.sol | Flow EVM testnet | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` |
+| EncryptConsistencyVerifier | Flow EVM testnet | `0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e` |
+| DecryptOpenVerifier | Flow EVM testnet | `0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc` |
 
-### JanusToken contracts (current)
+Trusted setup: Hermez phase 1 (200+ contributors) + Flow VRF beacon (testnet block 323555648).
+SHA256 zkey hashes verifiable via `circuits/setup/` in package.
 
-| Contract | Address |
-|----------|---------|
+### Deprecated — v0.1.0 (single-contributor zkey, DO NOT USE)
+
+| Contract | DEPRECATED Address |
+|----------|--------------------|
 | JanusToken.sol | `0xC715b3647536F671Aa25A6B6Ea1d7f5a0b9fA63D` |
-| JanusFlow.cdc | `0x28fef3d1d6a12800` (contract: `JanusFlow`) |
-| BabyJub.sol (lab) | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` |
 | EncryptConsistencyVerifier | `0x6F8Cc93dd6aA7B3ED0a3DaA75271815558ad9b5C` |
 | DecryptOpenVerifier | `0x3bB139B5404fD6b152813bC3532367AAa096638b` |
 
