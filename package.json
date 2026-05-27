@@ -1,6 +1,6 @@
 {
   "name": "@openjanus/sdk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Unified TypeScript SDK for OpenJanus privacy primitives on Flow — BabyJubJub, Pedersen, Groth16, JanusToken, JanusFlow (ElGamal-on-BabyJub), extensible module architecture",
   "author": "oydual3 <claucondor@gmail.com>",
   "license": "MIT",
