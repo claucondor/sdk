@@ -1,9 +1,22 @@
 /**
- * @openjanus/sdk — v0.3
+ * @openjanus/sdk — v0.4
  *
  * Generic, app-agnostic SDK for OpenJanus confidential token primitives on Flow.
  *
- * v0.3 highlights:
+ * v0.4 highlights (additive over v0.3 — NO breaking changes):
+ *   - JanusERC20 (ERC20-wrapping confidential token on Flow EVM) — same
+ *     shielded-transfer privacy as JanusFlow, with an explicit
+ *     amount + approve-and-pull boundary instead of payable msg.value.
+ *     Ships pinned to a permissionlessly-mintable MockUSDC underlying so
+ *     apps can develop against a stable 6-decimal token address even though
+ *     Flow EVM testnet lacks canonical USDC.
+ *   - JanusFT (Cadence-side wrapper for any FungibleToken vault) — lab-grade
+ *     port. Same STRUCTURAL privacy SHAPE as JanusERC20 (calldata + events +
+ *     storage), with stub babyAdd/babyNegate and opaque proof acceptance.
+ *     Real soundness lands in v0.5 once cross-VM BabyJub.sol calls land.
+ *   - All v0.3 exports retained — apps using JanusFlow keep working unchanged.
+ *
+ * v0.3 highlights (retained):
  *   - JanusFlow (native FLOW confidential token) — fully shielded transfers,
  *     leaks only at the wrap/unwrap boundary by design.
  *   - JanusToken abstract base — ready for ERC-20 / cross-asset extensions.
@@ -16,23 +29,26 @@
  *   primitives/ — Low-level crypto (BabyJub, Pedersen, Groth16)
  *   network/    — Flow client + COA management
  *   crypto/     — High-level crypto operations (commitments, proofs)
- *   tokens/     — JanusToken (abstract) + JanusFlow (concrete native FLOW)
+ *   tokens/     — JanusToken (abstract) + JanusFlow + JanusERC20 + JanusFT
  *
- * See MIGRATION-v0.3.md for v0.2 → v0.3 migration notes.
+ * See MIGRATION-v0.4.md (additive — no breaking changes) and MIGRATION-v0.3.md.
  */
 
 // ---------------------------------------------------------------------------
-// Token primitive — generic confidential token (v0.3 Pedersen)
+// Token primitives — generic confidential tokens (v0.4 multi-token)
 // ---------------------------------------------------------------------------
 export {
   JanusToken,
   JanusFlow,
   JanusFlowCadence,
+  JanusERC20,
+  JanusFTCadence,
   JANUS_TOKEN_BASE_ABI,
   JANUS_BABYJUB_ADDRESS,
   AMOUNT_DISCLOSE_VERIFIER,
   CONFIDENTIAL_TRANSFER_VERIFIER,
   JANUS_TOKEN_OWNER_EVM,
+  // JanusFlow (v0.3)
   JANUS_FLOW_TESTNET,
   JANUS_FLOW_EVM_ADDRESS,
   JANUS_FLOW_EVM_IMPL_ADDRESS,
@@ -40,11 +56,36 @@ export {
   JANUS_FLOW_CONTRACT_NAME,
   JANUS_FLOW_VERSION,
   JANUS_FLOW_MAX_WRAP_ATTOFLOW,
+  // JanusERC20 (v0.4)
+  JANUS_ERC20_TESTNET,
+  JANUS_ERC20_EVM_ADDRESS,
+  JANUS_ERC20_EVM_IMPL_ADDRESS,
+  JANUS_ERC20_MOCK_USDC_ADDRESS,
+  JANUS_ERC20_VERSION,
+  JANUS_ERC20_MAX_WRAP_RAW,
+  JANUS_ERC20_EXTRA_ABI,
+  ERC20_MINIMAL_ABI,
+  // JanusFT (v0.4)
+  JANUS_FT_CADENCE_ADDRESS,
+  JANUS_FT_CONTRACT_NAME,
+  JANUS_FT_VERSION,
+  JANUS_FT_DEFAULT_UNDERLYING_TYPE,
+  JANUS_FT_SMOKE_MIRROR_ADDRESS,
+  TX_FT_SETUP_REGISTRY,
+  TX_FT_WRAP,
+  TX_FT_SHIELDED_TRANSFER,
+  TX_FT_UNWRAP,
+  SCRIPT_FT_GET_TOTAL_LOCKED,
+  SCRIPT_FT_GET_COMMITMENT,
+  SCRIPT_FT_GET_UNDERLYING_TYPE,
+  buildJanusFTTx,
 } from "./tokens";
 export type {
   JanusTokenOptions,
   JanusFlowCadenceOptions,
   JanusFlowConstructorOptions,
+  JanusERC20ConstructorOptions,
+  JanusFTCadenceOptions,
   TokenOptions,
   TokenDeployment,
 } from "./tokens";
