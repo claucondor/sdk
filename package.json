@@ -1,7 +1,7 @@
 {
   "name": "@openjanus/sdk",
-  "version": "0.2.1",
-  "description": "Unified TypeScript SDK for OpenJanus privacy primitives on Flow — BabyJubJub, Pedersen, Groth16, JanusToken, JanusFlow (ElGamal-on-BabyJub), extensible module architecture",
+  "version": "0.3.0",
+  "description": "TypeScript SDK for OpenJanus confidential token primitives on Flow — JanusFlow (native FLOW, fully shielded transfers), generic Pedersen commitments, Groth16 amount-disclose + confidential-transfer proofs, cross-VM (Cadence + EVM) helpers",
   "author": "oydual3 <claucondor@gmail.com>",
   "license": "MIT",
   "type": "module",
@@ -42,8 +42,9 @@
   },
   "files": [
     "dist",
-    "circuits",
+    "circuits/v0.3",
     "README.md",
+    "MIGRATION-v0.3.md",
     "LICENSE"
   ],
   "publishConfig": {
@@ -79,19 +80,16 @@
     "babyjub",
     "pedersen",
     "groth16",
-    "janus-token",
-    "janus-flow",
     "zk",
     "privacy",
     "openjanus",
-    "erc-7984",
     "confidential-transfer",
-    "elgamal",
     "janus-token",
     "janus-flow",
-    "multi-sender-privacy",
-    "bsgs",
-    "encrypt-to-pubkey"
+    "shielded-transfer",
+    "amount-disclose",
+    "cross-vm",
+    "cadence"
   ],
   "repository": {
     "type": "git",
