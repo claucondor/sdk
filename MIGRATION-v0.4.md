@@ -4,11 +4,29 @@
 keep working unchanged. You only need to read this guide if you want to
 adopt the new multi-token primitives.
 
+OpenJanus is **Cadence-first**. The recommended path for most apps remains
+`JanusFlow` (native FLOW) or — new in v0.4 — `JanusFTCadence` (any Cadence
+FungibleToken). `JanusERC20` is **additive and advanced**: it exists for
+EVM-DeFi apps that need to wrap native ERC20s on Flow EVM. If you're tipping
+in FLOW or paying out in a Cadence FungibleToken, you do **not** need it.
+
 ---
 
 ## What's new
 
-### `JanusERC20` — confidential ERC20-wrapping token on Flow EVM
+### `JanusFTCadence` — Cadence FungibleToken wrapper (recommended for FT apps)
+
+See the section near the bottom of this file. This is the primary v0.4
+addition for Cadence-native apps that want amount privacy without touching
+the EVM directly.
+
+### `JanusERC20` — confidential ERC20-wrapping token on Flow EVM (advanced)
+
+> **Advanced — for EVM-DeFi integrations only.** Most apps should use
+> `JanusFlow` (native FLOW) or `JanusFTCadence` (Cadence FT) instead. Use
+> `JanusERC20` when your app is on Flow EVM, already speaks ERC20 (e.g.
+> integrating with a stablecoin), and you want shielded amounts on a
+> pure-EVM workflow.
 
 A second concrete `JanusToken` subclass, deployed to Flow EVM testnet at
 `0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e`. Wraps an arbitrary ERC20

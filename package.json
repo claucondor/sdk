@@ -1,7 +1,7 @@
 {
   "name": "@openjanus/sdk",
   "version": "0.4.0",
-  "description": "TypeScript SDK for OpenJanus confidential token primitives on Flow — JanusFlow (native FLOW), JanusERC20 (ERC20 wrapping with MockUSDC underlying on testnet), JanusFT (Cadence-side FungibleToken wrapping), generic Pedersen commitments, Groth16 amount-disclose + confidential-transfer proofs, cross-VM (Cadence + EVM) helpers",
+  "description": "Cadence-first privacy primitives for Flow — JanusFlow (native FLOW, recommended), JanusFTCadence (any FungibleToken vault), and JanusERC20 (advanced, ERC20-wrapping on Flow EVM). Pedersen commitments, Groth16 amount-disclose + confidential-transfer proofs, cross-VM (Cadence + EVM) helpers.",
   "author": "oydual3 <claucondor@gmail.com>",
   "license": "MIT",
   "type": "module",

@@ -1,34 +1,37 @@
 # @openjanus/sdk
 
-Generic, app-agnostic TypeScript SDK for OpenJanus confidential token primitives on Flow.
+Privacy primitives for the Flow blockchain.
 
-v0.4 ships **three concrete confidential tokens**:
+Tip your favorite creator without revealing how much you sent. Run a private
+payroll on-chain. Receive donations with hidden amounts. All using your
+existing Flow wallet — no new tools required.
 
-| Token         | Layer  | Underlying              | Address                                                       |
-|---------------|--------|-------------------------|----------------------------------------------------------------|
-| `JanusFlow`   | EVM    | Native FLOW             | `0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078`                   |
-| `JanusERC20`  | EVM    | ERC20 (MockUSDC on testnet) | `0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e`              |
-| `JanusFT`     | Cadence | Any FungibleToken vault | `0xbef3c77681c15397` (lab-grade — see MIGRATION-v0.4.md)      |
-
-All three expose the same shielded-transfer privacy: amount is hidden on
-calldata, events, and storage. Cleartext leaks are confined by design to the
-wrap / unwrap boundary.
-
-See `MIGRATION-v0.4.md` for the additive v0.3 → v0.4 migration (no breaking changes).
+OpenJanus is **Cadence-first**: privacy lives in Cadence-native flows that
+happen to settle through Flow EVM. The EVM is the implementation detail, not
+the product surface.
 
 ---
 
-## Install
+## Quick start (most users start here)
 
-```bash
-npm install @openjanus/sdk
+```typescript
+import { JanusFlow } from "@openjanus/sdk/tokens";
+import { ethers } from "ethers";
+
+const provider = new ethers.JsonRpcProvider("https://testnet.evm.nodes.onflow.org");
+const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+
+const flow = new JanusFlow();           // canonical testnet defaults
+await flow.connectWithSigner(wallet);
+
+// Shielded tip of 5 FLOW — amount HIDDEN end-to-end after the wrap
+await flow.wrap({ amountWei: 5_000_000_000_000_000_000n, /* + proof */ });
+await flow.shieldedTransfer({ to: charlieCoaHex, /* + proof */ });
 ```
 
-Peer dependencies (installed automatically):
-- `ethers` ^6 — Flow EVM provider
-- `@onflow/fcl` ^1.13 — Cadence transactions
-- `circomlibjs` ^0.1.7 — BabyJubJub + Pedersen
-- `snarkjs` ^0.7.6 — Groth16 proof generation
+For the full end-to-end walk-through (proof generation, blinding management,
+unwrap), see the [JanusFlow section](#janusflow--native-flow-recommended)
+below.
 
 ---
 
@@ -50,7 +53,40 @@ and the audits-kb privacy findings linked from the migration doc.
 
 ---
 
-## Quick start
+## Install
+
+```bash
+npm install @openjanus/sdk
+```
+
+Peer dependencies (installed automatically):
+- `ethers` ^6 — Flow EVM provider
+- `@onflow/fcl` ^1.13 — Cadence transactions
+- `circomlibjs` ^0.1.7 — BabyJubJub + Pedersen
+- `snarkjs` ^0.7.6 — Groth16 proof generation
+
+---
+
+## Token primitives
+
+OpenJanus ships three concrete confidential tokens. Pick the one that matches
+your asset — privacy semantics are identical across all three.
+
+| Token                | Layer    | Underlying              | Recommended for                                | Status      |
+|----------------------|----------|-------------------------|------------------------------------------------|-------------|
+| **`JanusFlow`**      | EVM      | Native FLOW             | Cadence apps tipping / paying in FLOW          | Production  |
+| **`JanusFTCadence`** | Cadence  | Any FungibleToken vault | Cadence-native FT integrations                 | Lab-grade   |
+| `JanusERC20`         | EVM      | ERC20 (MockUSDC on testnet) | EVM-DeFi apps wrapping native ERC20s       | Production  |
+
+Most apps want **JanusFlow**. Use `JanusFTCadence` if your app already speaks
+Cadence FungibleToken. `JanusERC20` is advanced — see below.
+
+### JanusFlow — Native FLOW (recommended)
+
+Deployed at `0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078` (Flow EVM testnet)
+with a Cadence router façade at `0x5dcbeb41055ec57e`. Users sign normal
+Cadence transactions; the router orchestrates the cross-VM EVM call via the
+signer's COA.
 
 ```typescript
 import {
@@ -133,14 +169,103 @@ App responsibilities (the SDK is intentionally generic):
 - Bound the user's whole-FLOW arithmetic — the circuit constrains
   `transferAmount ≤ oldBalance` and `amount ∈ [0, 2^64)`.
 
+### JanusFTCadence — any Cadence FungibleToken
+
+A Cadence-only confidential-amount wrapper for any `FungibleToken` vault.
+Deployed at `0xbef3c77681c15397` (`openjanus-flow`) with default underlying
+`A.7e60df042a9c0868.FlowToken.Vault`.
+
+Use this when your app already issues / consumes Cadence Fungible Tokens
+and you want to add privacy without bridging to EVM.
+
+```typescript
+import {
+  JanusFTCadence,
+  TX_FT_SETUP_REGISTRY, TX_FT_WRAP, TX_FT_SHIELDED_TRANSFER,
+} from "@openjanus/sdk";
+
+const ft = await new JanusFTCadence({ network: "testnet" }).configure();
+const totalLocked = await ft.getTotalLocked();
+const commit = await ft.balanceOfCommitment(someAddress);
+
+// State-changing flows are FCL transactions — pass the exported templates:
+//   await fcl.mutate({ cadence: TX_FT_WRAP, args: ... })
+```
+
+#### v0.4 lab-grade caveats
+
+- **Stub crypto.** `babyAddStub` and `babyNegateStub` are not real BabyJubJub
+  point ops — they hash coordinates so the output is opaque to a byte-level
+  observer. This is enough to validate the **structural** privacy properties
+  (calldata, events, storage shape), but accumulated state overflows
+  `UInt256` after enough operations. Real BabyJub homomorphic state lands in
+  v0.5 via cross-VM calls to the EVM `BabyJub.sol`.
+- **Opaque proofs.** `amountProofBytes` / `proofBytes` are accepted as long
+  as `length > 0`. Real Groth16 verification arrives in v0.5 (cross-VM call
+  to the EVM `ConfidentialTransferVerifier`).
+- **Registry locality.** The `CommitmentRegistry` resource must live on the
+  signer's account (lab spike model). Multiple distinct accounts CAN still
+  hold commitments via `shieldedTransfer` — recipients don't need a registry
+  resource of their own.
+- **Unwrap broken on stub crypto.** The smoke test intentionally skips
+  unwrap because `babyNegateStub + babyAddStub` deterministically overflow
+  during `totalSupplyCommitment` debit. Working unwrap arrives in v0.5.
+
+---
+
+## Advanced
+
+### JanusERC20 — native ERC20 on Flow EVM
+
+> Most users don't need this — use **JanusFlow** (for FLOW) or
+> **JanusFTCadence** (for Cadence FungibleTokens) instead.
+
+`JanusERC20` is the second EVM-side concrete `JanusToken`. It wraps an
+arbitrary ERC20 underlying instead of native FLOW. Use this when you are
+building a DeFi app on Flow EVM that already speaks ERC20 (e.g. integrating
+with a stablecoin) and you want shielded amounts on a pure-EVM workflow.
+
+Deployed to Flow EVM testnet at `0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e`
+(pinned to `MockUSDC` underlying — Flow EVM testnet does not have a canonical
+USDC). Same shielded-transfer privacy as `JanusFlow`; the wrap boundary is an
+`approve + transferFrom` pattern rather than `msg.value`.
+
+```ts
+import { JanusERC20 } from "@openjanus/sdk";
+
+const usdc = new JanusERC20();                  // canonical testnet defaults
+await usdc.connectWithSigner(wallet);
+
+// 1. Approve the proxy on the underlying ERC20:
+//    underlying.approve(usdc.address, amount) via your normal ERC20 SDK
+
+// 2. Wrap with an amount-disclose proof:
+await usdc.wrap({
+  amountRaw: 1_000_000n,                        // 1 USDC at 6 decimals
+  txCommit: [proof.commit.x, proof.commit.y],
+  amountProof: proof.proof,
+});
+
+// 3. Shielded transfer (HIDDEN amount):
+await usdc.shieldedTransfer({ to, publicInputs, proof });
+```
+
+For mainnet, deploy a fresh `JanusERC20Proxy` pinned to your real ERC20
+underlying (the proxy is one-instance-per-underlying — to wrap a second ERC20,
+deploy a second proxy).
+
+See [`MIGRATION-v0.4.md`](./MIGRATION-v0.4.md) for the full API including
+`unwrap` and operational notes.
+
 ---
 
 ## Module structure
 
 ```
 @openjanus/sdk
-├── tokens/      JanusToken (abstract), JanusFlow (concrete native FLOW),
-│                 JanusFlowCadence (Cadence router helper)
+├── tokens/      JanusToken (abstract), JanusFlow (recommended),
+│                 JanusFTCadence, JanusFlowCadence (router helper),
+│                 JanusERC20 (advanced)
 ├── crypto/      buildAmountDiscloseProof, buildShieldedTransferProof,
 │                 computeCommitment, randomBabyJubScalar, FLOW unit helpers
 ├── primitives/  BabyJub, Pedersen, Groth16 (low-level)
@@ -167,6 +292,15 @@ wasm, and verifier `.sol` so callers do not need to clone the lab.
 | JanusFlow.cdc (router)        | Flow Cadence testnet | `0x5dcbeb41055ec57e` |
 | Owner (admin COA, EVM)        | Flow EVM testnet     | `0x0000000000000000000000022f6b30af48a94787` |
 
+### v0.4 — multi-token (additive over v0.3)
+
+| Contract                       | Network              | Address |
+|-------------------------------|----------------------|---------|
+| JanusFTCadence (canonical)    | Flow Cadence testnet | `0xbef3c77681c15397` |
+| JanusERC20 (EVM proxy)        | Flow EVM testnet     | `0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e` |
+| JanusERC20 (EVM impl)         | Flow EVM testnet     | `0x7FE0B05ED77E0540519B6f10DD4b4521e867590D` |
+| MockUSDC (test underlying)    | Flow EVM testnet     | `0x3e8973dE565743Ef9748779bE377BBE050A13C22` |
+
 Trusted setup (v0.3): Hermez `pot14` (200+ contributors) + two named phase-2
 contributors + Flow VRF beacon at testnet block `323723000`. Full provenance
 chain (sha256 of every contribution) lives in
@@ -179,7 +313,7 @@ chain (sha256 of every contribution) lives in
 | v0.2 JanusToken (ElGamal accumulator) | `0x025efe7e89acdb8F315C804BE7245F348AA9c538`  | shieldedTransfer leaked cleartext `transferUnits` |
 | v0.2 EncryptConsistencyVerifier       | `0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e`  | only consumed by the v0.2 proxy |
 | v0.2 DecryptOpenVerifier              | `0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc`  | only consumed by the v0.2 proxy |
-| v0.2 Cadence router                   | `0xbef3c77681c15397`                          | bound to v0.2 EVM target |
+| v0.2 Cadence router                   | `0xbef3c77681c15397` (JanusFlow contract only) | bound to v0.2 EVM target |
 | v1 Cadence Pedersen zombie            | `0x28fef3d1d6a12800`                          | Flow protocol can't remove old contracts |
 
 See `MIGRATION-v0.3.md` for step-by-step migration.
