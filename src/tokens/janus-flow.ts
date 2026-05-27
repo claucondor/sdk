@@ -5,7 +5,7 @@
  * Cross-VM: Cadence transactions call JanusToken on Flow EVM via COA.
  *
  * Deployed contract (canonical — router/impl pattern):
- *   Cadence: 0xbef3c77681c15397 — contract name "JanusFlow"
+ *   Cadence: 0x5dcbeb41055ec57e — contract name "JanusFlow"
  *   Router deploy TX: 8d99b1c5610feee73f4361f13ea504a8bb911f4973ea3ead20b8ec9259cb3962
  *   Impl deploy TX:   f246c5a820523c27f7fbe01970f1f6f26855c6286001d98fc08a2b611976b3cb
  *
@@ -23,7 +23,7 @@
  *   JanusFlowImpl — pure stateless logic, swappable via 48h time-locked capability swap.
  *   IJanusFlowImpl — interface contract that all impls must conform to.
  *
- *   Apps import JanusFlow from 0xbef3c77681c15397 forever. Impl upgrades are
+ *   Apps import JanusFlow from 0x5dcbeb41055ec57e forever. Impl upgrades are
  *   transparent — custody stays in the router, public API is stable.
  *
  *   Upgrade flow:
@@ -46,9 +46,21 @@ import type { Ciphertext, EncryptProofResult, DecryptProofResult } from "./types
 // ---------------------------------------------------------------------------
 
 /** Canonical JanusFlow Cadence address — router/impl pattern, v0.2.0-router. */
-export const JANUS_FLOW_CADENCE_ADDRESS = "0xbef3c77681c15397";
+export const JANUS_FLOW_CADENCE_ADDRESS = "0x5dcbeb41055ec57e";
 export const JANUS_FLOW_CONTRACT_NAME = "JanusFlow";
-export const JANUS_FLOW_VERSION = "0.2.0-router";
+/**
+ * Active router/impl pattern version string.
+ * Semver only — addresses + features are tracked separately via JANUS_FLOW_CADENCE_ADDRESS
+ * and the deployment-record JSON in `circuits/setup/deployments-router.json`.
+ */
+export const JANUS_FLOW_VERSION = "0.2.1-router";
+
+/**
+ * @deprecated Previous router at 0xbef3c77681c15397. Had a 48h impl-swap time-lock
+ * that blocked the v0.2.1 vuln 014 fix-deploy, so a fresh router was created at
+ * 0x5dcbeb41055ec57e. Old commitments are stuck (unrecoverable per vuln 014).
+ */
+export const JANUS_FLOW_CADENCE_ADDRESS_PREVIOUS = "0xbef3c77681c15397";
 
 /**
  * Legacy address — zombie v1 Pedersen contract. Cannot be removed (Flow restriction).
@@ -58,10 +70,17 @@ export const JANUS_FLOW_VERSION = "0.2.0-router";
 export const JANUS_FLOW_CADENCE_ADDRESS_LEGACY = "0x28fef3d1d6a12800";
 
 /**
- * EVM address of the current JanusToken deployment (v0.2.0, ceremony-backed).
- * Use JanusToken class with this address for EVM-direct flows.
+ * EVM address of the current JanusToken UUPS proxy. Use the JanusToken class
+ * with this address for EVM-direct flows.
  */
-export const JANUS_FLOW_EVM_ADDRESS = "0xb12E600fFcde967210cFD81CF9f32bBB6e68a499";
+export const JANUS_FLOW_EVM_ADDRESS = "0x025efe7e89acdb8F315C804BE7245F348AA9c538";
+
+/**
+ * Previously-deployed JanusToken EVM address (pre-SCALE-fix). Retained for
+ * cross-referencing event history only — do NOT use for new wrap/unwrap calls.
+ * @deprecated
+ */
+export const JANUS_FLOW_EVM_ADDRESS_DEPRECATED = "0xb12E600fFcde967210cFD81CF9f32bBB6e68a499";
 
 // ---------------------------------------------------------------------------
 // Cadence transaction strings — JanusFlow
@@ -69,7 +88,7 @@ export const JANUS_FLOW_EVM_ADDRESS = "0xb12E600fFcde967210cFD81CF9f32bBB6e68a49
 
 /** Cadence tx: register BabyJubJub pubkey (one-time setup per account) */
 export const TX_REGISTER_PUBKEY = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 transaction(pkx: UInt256, pky: UInt256) {
     prepare(signer: auth(BorrowValue) &Account) {}
@@ -81,7 +100,7 @@ transaction(pkx: UInt256, pky: UInt256) {
 
 /** Cadence tx: wrap FLOW and encrypt amount to a recipient's pubkey */
 export const TX_WRAP_AND_ENCRYPT = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 import FungibleToken from 0x9a0766d93b6608b7
 import FlowToken from 0x7e60df042a9c0868
 
@@ -117,7 +136,7 @@ transaction(
 
 /** Cadence tx: confidential transfer between two registered accounts */
 export const TX_CONFIDENTIAL_TRANSFER = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 transaction(
     recipient: Address,
@@ -141,7 +160,7 @@ transaction(
 
 /** Cadence tx: decrypt accumulated slot and unwrap FLOW to recipient */
 export const TX_DECRYPT_AND_UNWRAP = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 import FungibleToken from 0x9a0766d93b6608b7
 import FlowToken from 0x7e60df042a9c0868
 
@@ -169,7 +188,7 @@ transaction(
 
 /** Cadence script: read a user's encrypted slot */
 export const SCRIPT_GET_SLOT = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 access(all) fun main(user: Address): {String: UInt256} {
     return JanusFlow.getSlot(user: user)
@@ -178,7 +197,7 @@ access(all) fun main(user: Address): {String: UInt256} {
 
 /** Cadence script: read a user's registered pubkey */
 export const SCRIPT_GET_PUBKEY = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 access(all) fun main(user: Address): {String: UInt256} {
     return JanusFlow.getPubkey(user: user)
@@ -187,7 +206,7 @@ access(all) fun main(user: Address): {String: UInt256} {
 
 /** Cadence script: check whether the router is paused */
 export const SCRIPT_IS_PAUSED = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 access(all) fun main(): Bool {
     return JanusFlow.isPaused()
@@ -196,7 +215,7 @@ access(all) fun main(): Bool {
 
 /** Cadence script: get the version string of the currently active impl */
 export const SCRIPT_GET_ACTIVE_IMPL_VERSION = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 access(all) fun main(): String {
     return JanusFlow.getActiveImplVersion()
@@ -206,12 +225,12 @@ access(all) fun main(): String {
 // ---------------------------------------------------------------------------
 // Admin Cadence transaction templates
 // Admin operations require the AdminResource capability stored at
-// /storage/janusFlowAdmin on the JanusFlow account (0xbef3c77681c15397).
+// /storage/janusFlowAdmin on the JanusFlow account (0x5dcbeb41055ec57e).
 // ---------------------------------------------------------------------------
 
 /** Cadence tx (admin): pause the JanusFlow router — emergency stop */
 export const TX_ADMIN_PAUSE = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 transaction {
     prepare(admin: auth(BorrowValue) &Account) {
@@ -225,7 +244,7 @@ transaction {
 
 /** Cadence tx (admin): unpause the JanusFlow router */
 export const TX_ADMIN_UNPAUSE = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 transaction {
     prepare(admin: auth(BorrowValue) &Account) {
@@ -248,8 +267,8 @@ transaction {
  * This template is a reference; adapt as needed for your key-management setup.
  */
 export const TX_ADMIN_PROPOSE_IMPL_SWAP = `
-import JanusFlow from 0xbef3c77681c15397
-import IJanusFlowImpl from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
+import IJanusFlowImpl from 0x5dcbeb41055ec57e
 
 transaction(newImplVersion: String) {
     prepare(admin: auth(BorrowValue) &Account) {
@@ -266,7 +285,7 @@ transaction(newImplVersion: String) {
 
 /** Cadence tx (admin): finalize impl swap after 48h time-lock has expired */
 export const TX_ADMIN_FINALIZE_IMPL_SWAP = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 transaction {
     prepare(admin: auth(BorrowValue) &Account) {
@@ -280,7 +299,7 @@ transaction {
 
 /** Cadence tx (admin): cancel a pending impl swap proposal */
 export const TX_ADMIN_CANCEL_IMPL_SWAP = `
-import JanusFlow from 0xbef3c77681c15397
+import JanusFlow from 0x5dcbeb41055ec57e
 
 transaction {
     prepare(admin: auth(BorrowValue) &Account) {
@@ -303,7 +322,7 @@ export interface JanusFlowOptions {
 /**
  * JanusFlow SDK — Cadence wrapper class for JanusToken EVM operations.
  *
- * Canonical address: 0xbef3c77681c15397 (router/impl pattern, v0.2.0-router).
+ * Canonical address: 0x5dcbeb41055ec57e (router/impl pattern, v0.2.0-router).
  * 25/25 e2e tests pass on this address (2026-05-26).
  *
  * Router/impl architecture:

@@ -28,9 +28,9 @@ function isHexAddress(s: string): boolean {
 // ---------------------------------------------------------------------------
 
 describe("JANUS_TOKEN_TESTNET constant", () => {
-  it("has v0.2.0 ceremony-backed EVM address", () => {
+  it("targets the UUPS proxy address (post-SCALE-fix deploy)", () => {
     expect(JANUS_TOKEN_TESTNET.evmAddress).toBe(
-      "0xb12E600fFcde967210cFD81CF9f32bBB6e68a499"
+      "0x025efe7e89acdb8F315C804BE7245F348AA9c538"
     );
   });
 
@@ -95,8 +95,8 @@ describe("JANUS_TOKEN_ABI", () => {
     expect(entry).toBeDefined();
   });
 
-  it("contains getSlotRaw (for reading ciphertext)", () => {
-    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("getSlotRaw"));
+  it("contains slotOf (for reading ciphertext)", () => {
+    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("slotOf"));
     expect(entry).toBeDefined();
   });
 
@@ -105,8 +105,18 @@ describe("JANUS_TOKEN_ABI", () => {
     expect(entry).toBeDefined();
   });
 
-  it("contains decryptAndUnwrap", () => {
-    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("decryptAndUnwrap"));
+  it("contains unwrap (post-SCALE-fix entrypoint)", () => {
+    const entry = JANUS_TOKEN_ABI.find((e) => /\bunwrap\(/.test(e));
+    expect(entry).toBeDefined();
+  });
+
+  it("contains wrap (payable, msg.value = N * SCALE)", () => {
+    const entry = JANUS_TOKEN_ABI.find((e) => /\bwrap\(/.test(e));
+    expect(entry).toBeDefined();
+  });
+
+  it("contains SCALE constant accessor (vuln 014 sanity check)", () => {
+    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("SCALE()"));
     expect(entry).toBeDefined();
   });
 
