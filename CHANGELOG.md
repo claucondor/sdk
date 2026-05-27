@@ -4,6 +4,47 @@ All notable changes to `@openjanus/sdk` are documented here.
 
 ---
 
+## [0.4.0] — 2026-05-27
+
+### Added (additive — no breaking changes from v0.3)
+
+- `JanusERC20` concrete ERC20-wrapping confidential token on Flow EVM testnet.
+  - Proxy at `0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e`, pinned to MockUSDC
+    underlying at `0x3e8973dE565743Ef9748779bE377BBE050A13C22` (6 decimals).
+  - Same shielded-transfer privacy as `JanusFlow`; wrap boundary uses
+    `approve + transferFrom` instead of `msg.value`.
+  - New exports: `JanusERC20`, `JANUS_ERC20_TESTNET`, `JANUS_ERC20_EVM_ADDRESS`,
+    `JANUS_ERC20_EVM_IMPL_ADDRESS`, `JANUS_ERC20_MOCK_USDC_ADDRESS`,
+    `JANUS_ERC20_VERSION`, `JANUS_ERC20_MAX_WRAP_RAW`, `JANUS_ERC20_EXTRA_ABI`,
+    `ERC20_MINIMAL_ABI`.
+- `JanusFTCadence` Cadence-side wrapper for any FungibleToken vault.
+  - Canonical contract at `0xbef3c77681c15397` (`openjanus-flow`); smoke
+    mirror at `0x3c601a443c81e6cd`.
+  - Default underlying is testnet FlowToken.Vault; configurable via Admin.
+  - **Stub crypto in v0.4** — `babyAddStub` / `babyNegateStub` are
+    placeholders; opaque proof acceptance. Structural privacy is real
+    (calldata, events, storage). Cross-VM crypto + verification land in v0.5.
+- Cadence transaction templates: `TX_FT_SETUP_REGISTRY`, `TX_FT_WRAP`,
+  `TX_FT_SHIELDED_TRANSFER`, `TX_FT_UNWRAP`.
+- Cadence read scripts: `SCRIPT_FT_GET_TOTAL_LOCKED`,
+  `SCRIPT_FT_GET_COMMITMENT`, `SCRIPT_FT_GET_UNDERLYING_TYPE`.
+- `buildJanusFTTx(template, addr)` helper to re-target a canonical template to
+  a non-canonical deployment (mainnet, smoke mirror, etc.).
+- 32 new unit tests covering JanusERC20 + JanusFT exports + templates.
+
+### Reused (unchanged from v0.3)
+
+- BabyJub.sol, AmountDiscloseVerifier, ConfidentialTransferVerifier — same
+  primitives back both `JanusFlow` and `JanusERC20`.
+- Same `circuits/v0.3/` zkey + wasm artifacts.
+
+### Migration
+
+See `MIGRATION-v0.4.md`. No breaking changes — existing JanusFlow imports
+keep working identically.
+
+---
+
 ## [0.2.0-router] — 2026-05-26
 
 ### Added

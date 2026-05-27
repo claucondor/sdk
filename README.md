@@ -2,10 +2,19 @@
 
 Generic, app-agnostic TypeScript SDK for OpenJanus confidential token primitives on Flow.
 
-v0.3 ships **JanusFlow**, a native-FLOW confidential token with **fully shielded
-transfers**: amount is hidden on calldata, events, and storage. Cleartext leaks
-are confined by design to the wrap / unwrap boundary (where you exchange FLOW
-for shielded balance).
+v0.4 ships **three concrete confidential tokens**:
+
+| Token         | Layer  | Underlying              | Address                                                       |
+|---------------|--------|-------------------------|----------------------------------------------------------------|
+| `JanusFlow`   | EVM    | Native FLOW             | `0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078`                   |
+| `JanusERC20`  | EVM    | ERC20 (MockUSDC on testnet) | `0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e`              |
+| `JanusFT`     | Cadence | Any FungibleToken vault | `0xbef3c77681c15397` (lab-grade — see MIGRATION-v0.4.md)      |
+
+All three expose the same shielded-transfer privacy: amount is hidden on
+calldata, events, and storage. Cleartext leaks are confined by design to the
+wrap / unwrap boundary.
+
+See `MIGRATION-v0.4.md` for the additive v0.3 → v0.4 migration (no breaking changes).
 
 ---
 
