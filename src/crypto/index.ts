@@ -1,11 +1,21 @@
 /**
- * crypto/index.ts — Higher-level crypto operations
+ * crypto/index.ts — Higher-level crypto operations (v0.3)
  *
  * These are the operations most app-level code will use.
  * They compose primitives into complete workflows.
+ *
+ * v0.3 replaces the v0.2 ElGamal proof builders (buildEncryptProof /
+ * buildDecryptProof / buildTransferProof) with two generic helpers that
+ * directly target the v0.3 Pedersen-commit shape:
+ *
+ *   buildAmountDiscloseProof   — wrap / unwrap boundary proof
+ *   buildShieldedTransferProof — fully shielded sender→recipient transfer
+ *
+ * The Pedersen commitment helpers and the FLOW unit + babyjub randomness
+ * utilities are retained.
  */
 
-// Commitment utilities
+// Commitment utilities (Pedersen on BabyJubJub)
 export {
   computeCommitment,
   addCommitments,
@@ -17,27 +27,22 @@ export {
 } from "./commitment";
 export type { CommitmentXY } from "./commitment";
 
-// Transfer proof generation
-export { buildTransferProof } from "./transfer-proof";
-export type { TransferProofInput, TransferProofResult } from "./transfer-proof";
-
-// ElGamal proof builders (Phase C addition for v0.2.0)
-// Groth16 proof generation for encrypt_consistency + decrypt_open circuits
-// Uses ceremony-backed zkeys (Hermez phase 1 + Flow VRF beacon block 323555648)
-export { buildEncryptProof, buildDecryptProof } from "./elgamal-proofs";
+// v0.3 amount-disclose proof (wrap + unwrap boundary)
+export { buildAmountDiscloseProof } from "./amount-disclose";
 export type {
-  ElGamalCiphertext,
-  EncryptProofInput,
-  EncryptProofResult,
-  DecryptProofInput,
-  DecryptProofResult,
+  AmountDiscloseProofInput,
+  AmountDiscloseProofResult,
   ProofArtifactOptions,
-} from "./elgamal-proofs";
+} from "./amount-disclose";
 
-// BabyJub randomness + FLOW unit conversion (v0.2.1 — vuln 014 fix lesson)
-// randomBabyJubScalar reduces mod subOrder (~2^250), NOT F.p (~2^254), to match
-// the circuit's Num2Bits(253). flowToWei / weiToFlow keep ZK whole-FLOW units
-// distinct from EVM wei to prevent unit-mismatch bugs.
+// v0.3 shielded-transfer proof (HIDDEN amount)
+export { buildShieldedTransferProof } from "./shielded-transfer";
+export type {
+  ShieldedTransferProofInput,
+  ShieldedTransferProofResult,
+} from "./shielded-transfer";
+
+// BabyJub randomness + FLOW unit conversion helpers
 export {
   randomBabyJubScalar,
   flowToWei,

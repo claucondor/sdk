@@ -1,24 +1,22 @@
 /**
  * crypto/babyjub-utils.ts — BabyJubJub randomness + FLOW unit conversion helpers
  *
- * These helpers were extracted in v0.2.1 after two recurring footguns:
+ * Two recurring footguns these helpers address:
  *
  *   1. Random scalar generation
  *      Naive `randomBytes(32) mod F.p` produces values in BabyJubJub's base field
- *      (~2^254), but the ElGamal circuits use Num2Bits(253) and `mulPointEscalar`
- *      decomposes scalars on the *subgroup* order (~2^250). A scalar > subOrder
- *      either fails witness generation silently or wraps non-deterministically,
- *      which made encrypt proofs flaky in 0.2.0. Use `randomBabyJubScalar()` —
- *      it mods by `babyjub.subOrder`, never by `F.p`.
+ *      (~2^254), but circomlib's `mulPointEscalar` decomposes scalars on the
+ *      *subgroup* order (~2^250). A scalar > subOrder either fails witness
+ *      generation silently or wraps non-deterministically. Use
+ *      `randomBabyJubScalar()` — it mods by `babyjub.subOrder`, never by `F.p`.
  *
- *   2. FLOW unit conversion (vuln 014)
- *      JanusToken.unwrap takes a "claimedUnits" value in WHOLE FLOW (small int from
- *      the decrypt_open circuit) and multiplies by SCALE = 1e18 internally to get
- *      wei. SDK callers that pass `valueWei` for wrap and `amountUnits` for unwrap
- *      will silently lose all locked FLOW. Use `flowToWei` and `weiToFlow` for
- *      explicit conversion and read the unit contract once.
- *
- * Reference: see the `JanusToken.SCALE()` constant on chain (always 1e18).
+ *   2. FLOW unit conversion
+ *      v0.3 JanusFlow takes wei (attoFLOW) on the EVM side directly — `wrap()`
+ *      is payable so `msg.value` is the cleartext amount the circuit binds via
+ *      AmountDisclose. `flowToWei` / `weiToFlow` keep whole-FLOW ↔ wei
+ *      conversions explicit. (v0.2 had a separate small-int "claimedUnits"
+ *      space that triggered audits-kb vuln 014; v0.3 removed that footgun by
+ *      using wei everywhere.)
  */
 
 import { randomBytes as nodeRandomBytes } from "crypto";
