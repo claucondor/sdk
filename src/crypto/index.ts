@@ -33,3 +33,16 @@ export type {
   DecryptProofResult,
   ProofArtifactOptions,
 } from "./elgamal-proofs";
+
+// BabyJub randomness + FLOW unit conversion (v0.2.1 — vuln 014 fix lesson)
+// randomBabyJubScalar reduces mod subOrder (~2^250), NOT F.p (~2^254), to match
+// the circuit's Num2Bits(253). flowToWei / weiToFlow keep ZK whole-FLOW units
+// distinct from EVM wei to prevent unit-mismatch bugs.
+export {
+  randomBabyJubScalar,
+  flowToWei,
+  weiToFlow,
+  assertWholeFlow,
+  FLOW_DECIMALS,
+  FLOW_SCALE,
+} from "./babyjub-utils";
