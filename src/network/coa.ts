@@ -10,12 +10,12 @@
  *   Charlie                0x3c601a443c81e6cd  → 0x00000000000000000000000249065458581f9bf0
  *   Dave                   0xd32d9100e1fe983b  → 0x0000000000000000000000027b94cfc8a64971cd
  *   openjanus-flow         0xbef3c77681c15397  → 0x0000000000000000000000022f6b30af48a94787
- *                                                  (also EVM proxy admin/owner)
+ *                                                  (v0.3 EVM proxy admin/owner)
  *
- * The JanusFlow Cadence router lives at 0x5dcbeb41055ec57e and does NOT need a COA
- * (it borrows the user's COA for each cross-VM call). The previous router
- * (0xbef3c77681c15397) and the legacy Pedersen zombie (0x28fef3d1d6a12800) are
- * intentionally NOT included as canonical entries — they are deprecated.
+ * The v0.3 JanusFlow Cadence router lives at 0x5dcbeb41055ec57e and does NOT
+ * need a COA (it borrows the signer's COA for each cross-VM call). The previous
+ * router (0xbef3c77681c15397) and the legacy Pedersen zombie (0x28fef3d1d6a12800)
+ * are intentionally NOT included as canonical entries — they are deprecated.
  */
 
 import type { FlowNetwork } from "./flow-client";

@@ -1,116 +1,273 @@
 /**
- * tokens/janus-flow.ts — JanusFlow Cadence wrapper SDK (router/impl pattern, v0.2.0-router)
+ * tokens/janus-flow.ts — JanusFlow concrete native-FLOW token (v0.3)
  *
- * JanusFlow wraps Cadence FLOW tokens into ElGamal-encrypted slots.
- * Cross-VM: Cadence transactions call JanusToken on Flow EVM via COA.
+ * JanusFlow plugs native FLOW custody into the JanusToken abstract base.
+ * `wrap()` is payable and binds `msg.value` to a Pedersen commitment via
+ * the amount-disclose proof. `unwrap()` releases the claimed amount and
+ * proves the shielded debit via TWO proofs (amount-disclose + transfer).
  *
- * Deployed contract (canonical — router/impl pattern):
- *   Cadence: 0x5dcbeb41055ec57e — contract name "JanusFlow"
- *   Router deploy TX: 8d99b1c5610feee73f4361f13ea504a8bb911f4973ea3ead20b8ec9259cb3962
- *   Impl deploy TX:   f246c5a820523c27f7fbe01970f1f6f26855c6286001d98fc08a2b611976b3cb
+ * Privacy boundaries (validated empirically — see lab v03-smoke.mjs):
+ *   wrap            : msg.value VISIBLE | commitment opaque       (boundary in)
+ *   unwrap          : claimedAmount + recipient VISIBLE           (boundary out)
+ *   shieldedTransfer: amount HIDDEN on calldata/events/storage    (full shielded)
  *
- * DEPRECATED — DO NOT USE:
- *   0x28fef3d1d6a12800.JanusFlow — legacy v1 Pedersen zombie, cannot be removed.
+ * v0.3 production deployment (Flow EVM testnet):
+ *   JanusFlow proxy:               0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078
+ *   JanusFlow impl:                0x9321dF5884021D7E19Ad0EB5F582f8E2A70236eC
+ *   AmountDiscloseVerifier:        0xD0ED3936530258C278f5357C1dB709ad34768352
+ *   ConfidentialTransferVerifier:  0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B
+ *   BabyJub (re-used):             0x27139AFda7425f51F68D32e0A38b7D43BcB0f870
+ *   Owner (admin COA):             0x0000000000000000000000022f6b30af48a94787
  *
- * Privacy property (from Phase 3 24/24 PASS + router e2e 25/25 PASS):
- *   Multiple senders encrypt amounts to the same recipient pubkey.
- *   Recipient decrypts accumulated total without learning per-sender amounts.
- *   On-chain state reveals only that transfers happened, not how much.
+ * Cadence router (v0.3, cross-VM wrapper):
+ *   Address:        0x5dcbeb41055ec57e (router) — calls the EVM proxy via COA
+ *   Contract:       JanusFlow
  *
- * Architecture — Router/Impl pattern (v0.2.0-router):
- *   JanusFlow (router) — public canonical address, holds custody (FLOW vault +
- *     commitments + pubkeys), never moves. Exposes pause/unpause + impl-swap admin.
- *   JanusFlowImpl — pure stateless logic, swappable via 48h time-locked capability swap.
- *   IJanusFlowImpl — interface contract that all impls must conform to.
- *
- *   Apps import JanusFlow from 0x5dcbeb41055ec57e forever. Impl upgrades are
- *   transparent — custody stays in the router, public API is stable.
- *
- *   Upgrade flow:
- *     1. Admin proposes new impl: proposeImplSwap(newImplCapability)
- *     2. 48h time-lock starts — apps can react/migrate/object
- *     3. Admin calls finalizeImplSwap() — capability swap, apps unchanged
- *
- *   ElGamal ciphertexts (c1=r*G, c2=m*G+r*PK) for multi-sender support.
- *   Any sender can encrypt to any registered recipient PK without coordination.
- *   Recipients decrypt their accumulated slot with their secret key + BSGS DLOG solver.
+ * MAX_WRAP per call: 18 FLOW (2^64 attoFLOW headroom for the circuit range proof).
  */
 
 import type { Point } from "../types/commitment";
+import type { TokenOptions } from "./types";
 import type { FlowNetwork } from "../network/flow-client";
-import { NETWORK_CONFIG } from "../network/flow-client";
-import type { Ciphertext, EncryptProofResult, DecryptProofResult } from "./types";
+import {
+  JanusToken,
+  JANUS_BABYJUB_ADDRESS,
+  AMOUNT_DISCLOSE_VERIFIER,
+  CONFIDENTIAL_TRANSFER_VERIFIER,
+} from "./janus-token";
 
 // ---------------------------------------------------------------------------
-// Deployment info
+// Canonical v0.3 deployment addresses
 // ---------------------------------------------------------------------------
 
-/** Canonical JanusFlow Cadence address — router/impl pattern, v0.2.0-router. */
+/** v0.3 JanusFlow ERC1967 proxy on Flow EVM testnet. */
+export const JANUS_FLOW_EVM_ADDRESS = "0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078";
+
+/** v0.3 JanusFlow implementation contract on Flow EVM testnet. */
+export const JANUS_FLOW_EVM_IMPL_ADDRESS = "0x9321dF5884021D7E19Ad0EB5F582f8E2A70236eC";
+
+/** v0.3 Cadence router address (cross-VM wrapper around the EVM proxy). */
 export const JANUS_FLOW_CADENCE_ADDRESS = "0x5dcbeb41055ec57e";
+
+/** Cadence contract name at the router address. */
 export const JANUS_FLOW_CONTRACT_NAME = "JanusFlow";
-/**
- * Active router/impl pattern version string.
- * Semver only — addresses + features are tracked separately via JANUS_FLOW_CADENCE_ADDRESS
- * and the deployment-record JSON in `circuits/setup/deployments-router.json`.
- */
-export const JANUS_FLOW_VERSION = "0.2.1-router";
+
+/** SDK version identifier. Tracks the on-chain `getActiveImplVersion()` value. */
+export const JANUS_FLOW_VERSION = "0.3.0";
+
+/** Per-call wrap cap (matches contract's MAX_WRAP — ~18 FLOW in attoFLOW). */
+export const JANUS_FLOW_MAX_WRAP_ATTOFLOW = 18_000_000_000_000_000_000n;
+
+/** Canonical testnet TokenOptions for the v0.3 JanusFlow deployment. */
+export const JANUS_FLOW_TESTNET: TokenOptions = {
+  evmAddress: JANUS_FLOW_EVM_ADDRESS,
+  network: "testnet",
+  babyJubAddress: JANUS_BABYJUB_ADDRESS,
+  amountDiscloseVerifierAddress: AMOUNT_DISCLOSE_VERIFIER,
+  confidentialTransferVerifierAddress: CONFIDENTIAL_TRANSFER_VERIFIER,
+};
 
 /**
- * @deprecated Previous router at 0xbef3c77681c15397. Had a 48h impl-swap time-lock
- * that blocked the v0.2.1 vuln 014 fix-deploy, so a fresh router was created at
- * 0x5dcbeb41055ec57e. Old commitments are stuck (unrecoverable per vuln 014).
+ * @deprecated v0.2 ElGamal JanusToken proxy — REMOVED in v0.3. Kept here for
+ * log-archeology only. v0.2 leaked the amount on every wrap and the per-sender
+ * cleartext `transferUnits` on every confidential transfer; see audits-kb
+ * vulnerability 014 + the v0.3 privacy audit findings for the rationale.
+ */
+export const JANUS_FLOW_EVM_ADDRESS_DEPRECATED_V02 =
+  "0x025efe7e89acdb8F315C804BE7245F348AA9c538";
+
+/**
+ * @deprecated v0.2 Cadence router (now points at the v0.2 EVM JanusToken).
+ * The v0.3 router upgrade landed at the SAME Cadence address, but apps that
+ * pinned to the OLD evm target should migrate to JANUS_FLOW_EVM_ADDRESS.
  */
 export const JANUS_FLOW_CADENCE_ADDRESS_PREVIOUS = "0xbef3c77681c15397";
 
 /**
- * Legacy address — zombie v1 Pedersen contract. Cannot be removed (Flow restriction).
- * DO NOT USE — import from JANUS_FLOW_CADENCE_ADDRESS instead.
- * @deprecated
+ * @deprecated Legacy v1 Pedersen zombie at this address — cannot be removed
+ * (Flow protocol restriction). DO NOT USE.
  */
 export const JANUS_FLOW_CADENCE_ADDRESS_LEGACY = "0x28fef3d1d6a12800";
 
-/**
- * EVM address of the current JanusToken UUPS proxy. Use the JanusToken class
- * with this address for EVM-direct flows.
- */
-export const JANUS_FLOW_EVM_ADDRESS = "0x025efe7e89acdb8F315C804BE7245F348AA9c538";
-
-/**
- * Previously-deployed JanusToken EVM address (pre-SCALE-fix). Retained for
- * cross-referencing event history only — do NOT use for new wrap/unwrap calls.
- * @deprecated
- */
-export const JANUS_FLOW_EVM_ADDRESS_DEPRECATED = "0xb12E600fFcde967210cFD81CF9f32bBB6e68a499";
-
 // ---------------------------------------------------------------------------
-// Cadence transaction strings — JanusFlow
+// ABI fragments specific to the JanusFlow concrete subclass (wrap/unwrap)
 // ---------------------------------------------------------------------------
 
-/** Cadence tx: register BabyJubJub pubkey (one-time setup per account) */
-export const TX_REGISTER_PUBKEY = `
-import JanusFlow from 0x5dcbeb41055ec57e
+/** ABI fragments for JanusFlow's wrap/unwrap concrete signatures + MAX_WRAP. */
+export const JANUS_FLOW_EXTRA_ABI = [
+  "function MAX_WRAP() view returns (uint256)",
+  "function wrap(uint256[2] txCommit, uint256[8] amountProof) external payable",
+  "function unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof) external",
+] as const;
 
-transaction(pkx: UInt256, pky: UInt256) {
-    prepare(signer: auth(BorrowValue) &Account) {}
-    execute {
-        JanusFlow.registerPubkey(pkx: pkx, pky: pky)
-    }
+// ---------------------------------------------------------------------------
+// JanusFlow class — concrete native-FLOW confidential token (v0.3)
+// ---------------------------------------------------------------------------
+
+export interface JanusFlowConstructorOptions extends TokenOptions {
+  // Inherits TokenOptions; the constructor takes the canonical testnet defaults
+  // unless overridden.
 }
-`;
 
-/** Cadence tx: wrap FLOW and encrypt amount to a recipient's pubkey */
-export const TX_WRAP_AND_ENCRYPT = `
+export class JanusFlow extends JanusToken {
+  constructor(opts: Partial<JanusFlowConstructorOptions> = {}) {
+    super({
+      ...JANUS_FLOW_TESTNET,
+      ...opts,
+      extraAbi: JANUS_FLOW_EXTRA_ABI,
+    });
+  }
+
+  /** Per-call wrap cap (queried from chain). */
+  async maxWrap(): Promise<bigint> {
+    const v = await this._contract().MAX_WRAP();
+    return BigInt(v.toString());
+  }
+
+  // ---------------------------------------------------------------------------
+  // Write: wrap — payable; binds msg.value to a Pedersen commitment
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Wrap `amountWei` of native FLOW into the caller's shielded slot.
+   *
+   * The on-chain verifier checks that `txCommit` is a Pedersen commitment of
+   * exactly `amountWei` (in attoFLOW = wei) with the supplied (private) blinding.
+   * Build `txCommit` + `amountProof` via `buildAmountDiscloseProof()`.
+   *
+   * msg.value is VISIBLE BY DESIGN — this is the wrap boundary.
+   *
+   * @param params.amountWei    msg.value (attoFLOW). Must equal the proof's
+   *                            claimed_amount and be <= MAX_WRAP.
+   * @param params.txCommit     [Cx, Cy] — Pedersen commit of amountWei
+   * @param params.amountProof  uint256[8] — pi_b Fp2-swapped Groth16 proof
+   */
+  async wrap(params: {
+    amountWei: bigint;
+    txCommit: readonly [bigint, bigint] | readonly bigint[];
+    amountProof:
+      | readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]
+      | readonly bigint[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }): Promise<any> {
+    const { amountWei, txCommit, amountProof } = params;
+    if (txCommit.length !== 2) {
+      throw new Error(
+        `JanusFlow.wrap: txCommit must have 2 elements, got ${txCommit.length}`
+      );
+    }
+    if (amountProof.length !== 8) {
+      throw new Error(
+        `JanusFlow.wrap: amountProof must have 8 elements, got ${amountProof.length}`
+      );
+    }
+    if (amountWei <= 0n) {
+      throw new Error(`JanusFlow.wrap: amountWei must be > 0, got ${amountWei}`);
+    }
+    if (amountWei > JANUS_FLOW_MAX_WRAP_ATTOFLOW) {
+      throw new Error(
+        `JanusFlow.wrap: amountWei ${amountWei} exceeds MAX_WRAP ${JANUS_FLOW_MAX_WRAP_ATTOFLOW}`
+      );
+    }
+    const tx = await this._contract().wrap(
+      [...txCommit],
+      [...amountProof],
+      { value: amountWei }
+    );
+    return tx.wait();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Write: unwrap — releases native FLOW with ZK proofs
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Release `claimedAmountWei` of native FLOW to `recipient`. The sender's
+   * residual commitment stays hidden — only the claimed amount + recipient
+   * are leaked at the boundary.
+   *
+   * Requires TWO proofs:
+   *   1. amount-disclose: `txCommit` commits to `claimedAmountWei`.
+   *   2. confidential-transfer: caller's storage commitment can be split into
+   *      `txCommit + C_new`.
+   *
+   * The contract enforces `transferPublicInputs[0..1] == sender's stored commitment`
+   * and `transferPublicInputs[2..3] == txCommit` — keep these consistent or
+   * the call reverts.
+   *
+   * @param params.claimedAmountWei  attoFLOW being released
+   * @param params.recipient         EVM address that receives the FLOW
+   * @param params.txCommit          [Cx, Cy] of claimedAmountWei
+   * @param params.amountProof       uint256[8] amount-disclose proof
+   * @param params.transferPublicInputs  uint256[6] — [C_old, C_tx, C_new]
+   * @param params.transferProof     uint256[8] confidential-transfer proof
+   */
+  async unwrap(params: {
+    claimedAmountWei: bigint;
+    recipient: string;
+    txCommit: readonly [bigint, bigint] | readonly bigint[];
+    amountProof:
+      | readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]
+      | readonly bigint[];
+    transferPublicInputs:
+      | readonly [bigint, bigint, bigint, bigint, bigint, bigint]
+      | readonly bigint[];
+    transferProof:
+      | readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]
+      | readonly bigint[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }): Promise<any> {
+    const {
+      claimedAmountWei,
+      recipient,
+      txCommit,
+      amountProof,
+      transferPublicInputs,
+      transferProof,
+    } = params;
+    if (txCommit.length !== 2) throw new Error("JanusFlow.unwrap: txCommit must be length 2");
+    if (amountProof.length !== 8) throw new Error("JanusFlow.unwrap: amountProof must be length 8");
+    if (transferPublicInputs.length !== 6)
+      throw new Error("JanusFlow.unwrap: transferPublicInputs must be length 6");
+    if (transferProof.length !== 8)
+      throw new Error("JanusFlow.unwrap: transferProof must be length 8");
+    if (claimedAmountWei <= 0n)
+      throw new Error(`JanusFlow.unwrap: claimedAmountWei must be > 0, got ${claimedAmountWei}`);
+
+    const tx = await this._contract().unwrap(
+      claimedAmountWei,
+      recipient,
+      [...txCommit],
+      [...amountProof],
+      [...transferPublicInputs],
+      [...transferProof]
+    );
+    return tx.wait();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cadence transaction strings — v0.3 router
+//
+// The Cadence side just translates FCL signers + ABI calldata to the EVM
+// proxy via COA. Calldata is built off-chain (e.g. via ethers.js) because
+// Cadence's EVM.encodeABIWithSignature struggles with fixed-length arrays.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cadence tx: cross-VM wrap. Withdraws `amount` FLOW from signer, deposits it
+ * into signer's COA, and calls JanusFlow.wrap(txCommit, amountProof) via the COA.
+ */
+export const TX_WRAP = `
 import JanusFlow from 0x5dcbeb41055ec57e
 import FungibleToken from 0x9a0766d93b6608b7
 import FlowToken from 0x7e60df042a9c0868
 
 transaction(
     amount: UFix64,
-    recipient: Address,
-    c1x: UInt256, c1y: UInt256,
-    c2x: UInt256, c2y: UInt256,
-    proof: [UInt256],
-    pubInputs: [UInt256]
+    txCommit: [UInt256],
+    amountProof: [UInt256],
+    calldataHex: String
 ) {
     let vault: @FlowToken.Vault
 
@@ -122,98 +279,83 @@ transaction(
     }
 
     execute {
-        JanusFlow.wrapAndEncrypt(
+        JanusFlow.wrap(
+            signer: getAuthAccount<auth(BorrowValue) &Account>(0x0),
             vault: <-self.vault,
-            recipient: recipient,
-            c1x: c1x, c1y: c1y,
-            c2x: c2x, c2y: c2y,
-            proof: proof,
-            pubInputs: pubInputs
+            txCommit: txCommit,
+            amountProof: amountProof,
+            calldataHex: calldataHex
         )
     }
 }
 `;
 
-/** Cadence tx: confidential transfer between two registered accounts */
-export const TX_CONFIDENTIAL_TRANSFER = `
+/**
+ * Cadence tx: cross-VM shieldedTransfer. The recipient is identified via the
+ * EVM hex address — pass `toEVMHex` plus the off-chain-built calldata.
+ */
+export const TX_SHIELDED_TRANSFER = `
 import JanusFlow from 0x5dcbeb41055ec57e
 
 transaction(
-    recipient: Address,
-    c1x: UInt256, c1y: UInt256,
-    c2x: UInt256, c2y: UInt256,
+    toEVMHex: String,
+    publicInputs: [UInt256],
     proof: [UInt256],
-    pubInputs: [UInt256]
+    calldataHex: String
 ) {
-    prepare(signer: auth(BorrowValue) &Account) {}
-    execute {
-        JanusFlow.confidentialTransfer(
-            recipient: recipient,
-            c1x: c1x, c1y: c1y,
-            c2x: c2x, c2y: c2y,
+    prepare(signer: auth(BorrowValue) &Account) {
+        JanusFlow.shieldedTransfer(
+            signer: signer,
+            toEVMHex: toEVMHex,
+            publicInputs: publicInputs,
             proof: proof,
-            pubInputs: pubInputs
+            calldataHex: calldataHex
         )
     }
 }
 `;
 
-/** Cadence tx: decrypt accumulated slot and unwrap FLOW to recipient */
-export const TX_DECRYPT_AND_UNWRAP = `
+/**
+ * Cadence tx: cross-VM unwrap. Calls JanusFlow.unwrap on the EVM proxy, which
+ * sends FLOW back to `recipientEVMHex` via low-level call.
+ */
+export const TX_UNWRAP = `
 import JanusFlow from 0x5dcbeb41055ec57e
-import FungibleToken from 0x9a0766d93b6608b7
-import FlowToken from 0x7e60df042a9c0868
 
 transaction(
-    amount: UFix64,
-    to: Address,
-    proof: [UInt256],
-    pubInputs: [UInt256]
+    claimedAmount: UFix64,
+    recipientEVMHex: String,
+    txCommit: [UInt256],
+    amountProof: [UInt256],
+    transferPublicInputs: [UInt256],
+    transferProof: [UInt256],
+    calldataHex: String
 ) {
-    prepare(signer: auth(BorrowValue) &Account) {}
-    execute {
-        let vault <- JanusFlow.decryptAndUnwrap(
-            amount: amount,
-            proof: proof,
-            pubInputs: pubInputs
+    prepare(signer: auth(BorrowValue) &Account) {
+        JanusFlow.unwrap(
+            signer: signer,
+            claimedAmount: claimedAmount,
+            recipientEVMHex: recipientEVMHex,
+            txCommit: txCommit,
+            amountProof: amountProof,
+            transferPublicInputs: transferPublicInputs,
+            transferProof: transferProof,
+            calldataHex: calldataHex
         )
-        let recipientRef = getAccount(to)
-            .capabilities
-            .borrow<&{FungibleToken.Receiver}>(/public/flowTokenReceiver)
-            ?? panic("No FlowToken.Receiver on recipient")
-        recipientRef.deposit(from: <-vault)
     }
 }
 `;
 
-/** Cadence script: read a user's encrypted slot */
-export const SCRIPT_GET_SLOT = `
+/** Cadence script: get total locked FLOW (from router mirror). */
+export const SCRIPT_GET_TOTAL_LOCKED = `
 import JanusFlow from 0x5dcbeb41055ec57e
 
-access(all) fun main(user: Address): {String: UInt256} {
-    return JanusFlow.getSlot(user: user)
+access(all) fun main(): UFix64 {
+    return JanusFlow.getTotalLocked()
 }
 `;
 
-/** Cadence script: read a user's registered pubkey */
-export const SCRIPT_GET_PUBKEY = `
-import JanusFlow from 0x5dcbeb41055ec57e
-
-access(all) fun main(user: Address): {String: UInt256} {
-    return JanusFlow.getPubkey(user: user)
-}
-`;
-
-/** Cadence script: check whether the router is paused */
-export const SCRIPT_IS_PAUSED = `
-import JanusFlow from 0x5dcbeb41055ec57e
-
-access(all) fun main(): Bool {
-    return JanusFlow.isPaused()
-}
-`;
-
-/** Cadence script: get the version string of the currently active impl */
+/** Cadence script: get the active JanusFlow impl version string. */
 export const SCRIPT_GET_ACTIVE_IMPL_VERSION = `
 import JanusFlow from 0x5dcbeb41055ec57e
 
@@ -222,13 +364,28 @@ access(all) fun main(): String {
 }
 `;
 
+/** Cadence script: check whether the router is paused. */
+export const SCRIPT_IS_PAUSED = `
+import JanusFlow from 0x5dcbeb41055ec57e
+
+access(all) fun main(): Bool {
+    return JanusFlow.isPaused()
+}
+`;
+
+/** Cadence script: get the active EVM target address (canonical JanusFlow proxy). */
+export const SCRIPT_GET_EVM_TARGET = `
+import JanusFlow from 0x5dcbeb41055ec57e
+
+access(all) fun main(): String {
+    return JanusFlow.getJanusTokenAddress()
+}
+`;
+
 // ---------------------------------------------------------------------------
-// Admin Cadence transaction templates
-// Admin operations require the AdminResource capability stored at
-// /storage/janusFlowAdmin on the JanusFlow account (0x5dcbeb41055ec57e).
+// Admin Cadence transaction templates (capability-based AdminResource)
 // ---------------------------------------------------------------------------
 
-/** Cadence tx (admin): pause the JanusFlow router — emergency stop */
 export const TX_ADMIN_PAUSE = `
 import JanusFlow from 0x5dcbeb41055ec57e
 
@@ -242,7 +399,6 @@ transaction {
 }
 `;
 
-/** Cadence tx (admin): unpause the JanusFlow router */
 export const TX_ADMIN_UNPAUSE = `
 import JanusFlow from 0x5dcbeb41055ec57e
 
@@ -256,439 +412,47 @@ transaction {
 }
 `;
 
-/**
- * Cadence tx (admin): propose an impl swap.
- * Starts the 48h (172800s) time-lock. newImplVersion is the version string
- * of the incoming impl (used for on-chain tracking + events).
- *
- * NOTE: The capability itself must be passed as a Cadence argument.
- * In practice, this transaction is constructed manually or via a custom
- * admin script that already holds the newImpl Capability reference.
- * This template is a reference; adapt as needed for your key-management setup.
- */
-export const TX_ADMIN_PROPOSE_IMPL_SWAP = `
-import JanusFlow from 0x5dcbeb41055ec57e
-import IJanusFlowImpl from 0x5dcbeb41055ec57e
-
-transaction(newImplVersion: String) {
-    prepare(admin: auth(BorrowValue) &Account) {
-        let adminRef = admin.storage.borrow<&JanusFlow.AdminResource>(
-            from: /storage/janusFlowAdmin
-        ) ?? panic("No AdminResource in signer storage")
-        // Capability acquisition is app-specific — adapt this template
-        // with the concrete newImpl Capability<&IJanusFlowImpl.IImpl> reference.
-        // adminRef.proposeImplSwap(newImpl: newImplCap, newVersion: newImplVersion)
-        panic("Adapt this template: acquire the impl capability before calling proposeImplSwap")
-    }
-}
-`;
-
-/** Cadence tx (admin): finalize impl swap after 48h time-lock has expired */
-export const TX_ADMIN_FINALIZE_IMPL_SWAP = `
-import JanusFlow from 0x5dcbeb41055ec57e
-
-transaction {
-    prepare(admin: auth(BorrowValue) &Account) {
-        let adminRef = admin.storage.borrow<&JanusFlow.AdminResource>(
-            from: /storage/janusFlowAdmin
-        ) ?? panic("No AdminResource in signer storage")
-        adminRef.finalizeImplSwap()
-    }
-}
-`;
-
-/** Cadence tx (admin): cancel a pending impl swap proposal */
-export const TX_ADMIN_CANCEL_IMPL_SWAP = `
-import JanusFlow from 0x5dcbeb41055ec57e
-
-transaction {
-    prepare(admin: auth(BorrowValue) &Account) {
-        let adminRef = admin.storage.borrow<&JanusFlow.AdminResource>(
-            from: /storage/janusFlowAdmin
-        ) ?? panic("No AdminResource in signer storage")
-        adminRef.cancelImplSwap()
-    }
-}
-`;
-
 // ---------------------------------------------------------------------------
-// JanusFlow class
+// Cadence router helper class — read-only FCL wrappers
+//
+// Wrap+shieldedTransfer+unwrap REQUIRE pre-built calldata for the EVM target,
+// so the Cadence helper exposes them as method-shape stubs. Most apps will
+// build calldata via ethers.js and pass it through TX_WRAP/TX_SHIELDED_TRANSFER
+// /TX_UNWRAP directly with their own FCL authz.
 // ---------------------------------------------------------------------------
 
-export interface JanusFlowOptions {
+export interface JanusFlowCadenceOptions {
   network: FlowNetwork;
 }
 
 /**
- * JanusFlow SDK — Cadence wrapper class for JanusToken EVM operations.
- *
- * Canonical address: 0x5dcbeb41055ec57e (router/impl pattern, v0.2.0-router).
- * 25/25 e2e tests pass on this address (2026-05-26).
- *
- * Router/impl architecture:
- *   JanusFlow (router at canonical address) — public API + custody (FLOW vault +
- *     commitments + pubkeys). Never moves. Exposes admin: pause/unpause + impl-swap.
- *   JanusFlowImpl — current pure-logic impl. Swappable via 48h time-locked capability.
- *
- * Admin operations (owner only, via AdminResource capability):
- *   pause() / unpause()      — emergency stop; isPaused() is a public view
- *   proposeImplSwap(cap)     — start 48h time-lock for impl upgrade
- *   finalizeImplSwap()       — complete upgrade after time-lock expires
- *   cancelImplSwap()         — abort a pending upgrade proposal
- *   getActiveImplVersion()   — returns the version string of the current impl
- *
- * User-facing operations (any account):
- *   registerPubkey(pk, authz)                          — one-time BabyJubJub key setup
- *   wrapAndEncrypt(amount, recipient, proof, authz)    — wrap FLOW + encrypt
- *   confidentialTransfer(recipient, proof, authz)      — slot-to-slot transfer
- *   decryptAndUnwrap(amount, to, proof, authz)         — claim + unwrap FLOW
- *   getSlot(userAddress)                               — read encrypted slot (view)
- *   getPubkey(userAddress)                             — read registered pubkey (view)
- *
- * Operations execute as Cadence transactions (cross-VM: Cadence to EVM via COA).
- * Callers provide FCL-compatible authorization functions.
- *
- * @see https://github.com/openjanus/sdk/blob/main/docs/ARCHITECTURE.md
+ * Read-only Cadence router helper. Mirrors a subset of the JanusFlow.cdc
+ * contract's public scripts. State-changing flows are handled via the
+ * exported TX_* templates so apps stay in control of FCL authorization.
  */
-export class JanusFlow {
+export class JanusFlowCadence {
   private readonly network: FlowNetwork;
 
-  constructor(opts: JanusFlowOptions = { network: "testnet" }) {
+  constructor(opts: JanusFlowCadenceOptions = { network: "testnet" }) {
     this.network = opts.network;
   }
 
-  // ---------------------------------------------------------------------------
-  // Configuration
-  // ---------------------------------------------------------------------------
-
-  /** Configure FCL for this network. Call once before any operations. */
+  /** Configure FCL access node for this network. Call once at app boot. */
   async configure(): Promise<this> {
     const fcl = await import("@onflow/fcl");
+    const { NETWORK_CONFIG } = await import("../network/flow-client.js");
     const config = NETWORK_CONFIG[this.network];
     fcl.config({ "accessNode.api": config.flowAccessApi });
     return this;
   }
 
-  // ---------------------------------------------------------------------------
-  // Read: slot and pubkey
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Read a user's ElGamal-encrypted balance slot.
-   * Returns identity ciphertext (c1=(0,1), c2=(0,1)) if slot is empty.
-   *
-   * @param userAddress  Cadence account address
-   */
-  async getSlot(userAddress: string): Promise<Ciphertext> {
-    const fcl = await import("@onflow/fcl");
-
-    const result = await fcl.query({
-      cadence: SCRIPT_GET_SLOT,
-      args: (arg: unknown, typeOf: unknown) => [
-        // @ts-expect-error FCL types are dynamic
-        arg(userAddress, typeOf.Address),
-      ],
-    });
-
-    const raw = result as { c1x: string; c1y: string; c2x: string; c2y: string };
-    return {
-      c1: { x: BigInt(raw.c1x), y: BigInt(raw.c1y) },
-      c2: { x: BigInt(raw.c2x), y: BigInt(raw.c2y) },
-    };
-  }
-
-  /**
-   * Read a user's registered BabyJubJub public key.
-   * Returns identity (0,1) if not registered.
-   *
-   * @param userAddress  Cadence account address
-   */
-  async getPubkey(userAddress: string): Promise<Point> {
-    const fcl = await import("@onflow/fcl");
-
-    const result = await fcl.query({
-      cadence: SCRIPT_GET_PUBKEY,
-      args: (arg: unknown, typeOf: unknown) => [
-        // @ts-expect-error FCL types are dynamic
-        arg(userAddress, typeOf.Address),
-      ],
-    });
-
-    const raw = result as { pkx: string; pky: string };
-    return { x: BigInt(raw.pkx), y: BigInt(raw.pky) };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Write: registerPubkey
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Register a BabyJubJub public key for this account.
-   * Must be called once before the account can receive encrypted amounts.
-   *
-   * @param pk    BabyJubJub public key (on-curve point)
-   * @param authz FCL authorization function
-   */
-  async registerPubkey(
-    pk: Point,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authz: any
-  ): Promise<{ txId: string }> {
-    const fcl = await import("@onflow/fcl");
-
-    const txId = await fcl.mutate({
-      cadence: TX_REGISTER_PUBKEY,
-      args: (arg: unknown, typeOf: unknown) => [
-        // @ts-expect-error FCL types are dynamic
-        arg(pk.x.toString(), typeOf.UInt256),
-        // @ts-expect-error FCL types are dynamic
-        arg(pk.y.toString(), typeOf.UInt256),
-      ],
-      proposer: authz,
-      payer: authz,
-      authorizations: [authz],
-      limit: 9999,
-    });
-
-    await fcl.tx(txId).onceSealed();
-    return { txId };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Write: wrapAndEncrypt
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Wrap FLOW and encrypt the amount to a recipient's registered pubkey.
-   *
-   * The caller's FLOW vault is debited by `amount`. An ElGamal ciphertext
-   * (c1, c2) encrypting `amount` to the recipient's pubkey is accumulated
-   * into the recipient's on-chain slot. The encrypt-consistency proof
-   * is verified on-chain before the slot is updated.
-   *
-   * @param amount      FLOW amount as UFix64 string (e.g. "10.0")
-   * @param recipient   Cadence address of the recipient (must have registered pubkey)
-   * @param proofResult Result from buildEncryptProof()
-   * @param authz       FCL authorization function
-   */
-  async wrapAndEncrypt(
-    amount: string,
-    recipient: string,
-    proofResult: EncryptProofResult,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authz: any
-  ): Promise<{ txId: string; ciphertext: Ciphertext }> {
-    const fcl = await import("@onflow/fcl");
-    const { ciphertext, proof, publicInputs } = proofResult;
-
-    const proofArr = [...proof].map((v) => v.toString());
-    const pubInputsArr = [...publicInputs].map((v) => v.toString());
-
-    const txId = await fcl.mutate({
-      cadence: TX_WRAP_AND_ENCRYPT,
-      args: (arg: unknown, typeOf: unknown) => [
-        // @ts-expect-error FCL types are dynamic
-        arg(amount, typeOf.UFix64),
-        // @ts-expect-error FCL types are dynamic
-        arg(recipient, typeOf.Address),
-        // @ts-expect-error FCL types are dynamic
-        arg(ciphertext.c1.x.toString(), typeOf.UInt256),
-        // @ts-expect-error FCL types are dynamic
-        arg(ciphertext.c1.y.toString(), typeOf.UInt256),
-        // @ts-expect-error FCL types are dynamic
-        arg(ciphertext.c2.x.toString(), typeOf.UInt256),
-        // @ts-expect-error FCL types are dynamic
-        arg(ciphertext.c2.y.toString(), typeOf.UInt256),
-        // @ts-expect-error FCL types are dynamic
-        arg(proofArr, typeOf.Array(typeOf.UInt256)),
-        // @ts-expect-error FCL types are dynamic
-        arg(pubInputsArr, typeOf.Array(typeOf.UInt256)),
-      ],
-      proposer: authz,
-      payer: authz,
-      authorizations: [authz],
-      limit: 9999,
-    });
-
-    await fcl.tx(txId).onceSealed();
-    return { txId, ciphertext };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Write: confidentialTransfer
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Confidential transfer from caller to recipient.
-   *
-   * Generates an ElGamal ciphertext of `amount` encrypted to the recipient's
-   * registered pubkey. Verifies the encrypt-consistency proof on-chain, then
-   * atomically decrements the sender's slot and increments the recipient's slot.
-   *
-   * @param recipient   Cadence address of the recipient
-   * @param proofResult Result from buildEncryptProof()
-   * @param authz       FCL authorization function
-   */
-  async confidentialTransfer(
-    recipient: string,
-    proofResult: EncryptProofResult,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authz: any
-  ): Promise<{ txId: string; ciphertext: Ciphertext }> {
-    const fcl = await import("@onflow/fcl");
-    const { ciphertext, proof, publicInputs } = proofResult;
-
-    const proofArr = [...proof].map((v) => v.toString());
-    const pubInputsArr = [...publicInputs].map((v) => v.toString());
-
-    const txId = await fcl.mutate({
-      cadence: TX_CONFIDENTIAL_TRANSFER,
-      args: (arg: unknown, typeOf: unknown) => [
-        // @ts-expect-error FCL types are dynamic
-        arg(recipient, typeOf.Address),
-        // @ts-expect-error FCL types are dynamic
-        arg(ciphertext.c1.x.toString(), typeOf.UInt256),
-        // @ts-expect-error FCL types are dynamic
-        arg(ciphertext.c1.y.toString(), typeOf.UInt256),
-        // @ts-expect-error FCL types are dynamic
-        arg(ciphertext.c2.x.toString(), typeOf.UInt256),
-        // @ts-expect-error FCL types are dynamic
-        arg(ciphertext.c2.y.toString(), typeOf.UInt256),
-        // @ts-expect-error FCL types are dynamic
-        arg(proofArr, typeOf.Array(typeOf.UInt256)),
-        // @ts-expect-error FCL types are dynamic
-        arg(pubInputsArr, typeOf.Array(typeOf.UInt256)),
-      ],
-      proposer: authz,
-      payer: authz,
-      authorizations: [authz],
-      limit: 9999,
-    });
-
-    await fcl.tx(txId).onceSealed();
-    return { txId, ciphertext };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Write: decryptAndUnwrap
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Decrypt the caller's accumulated slot and unwrap FLOW to a recipient address.
-   *
-   * Generates a decrypt-open proof proving the caller knows their secret key
-   * and the decryption is correct. The proof is verified on-chain, then FLOW
-   * is released from the JanusFlow vault to the specified recipient.
-   *
-   * @param amount      UFix64 string of FLOW to unwrap (e.g. "42.0")
-   * @param to          Cadence address to receive the unwrapped FLOW
-   * @param proofResult Result from buildDecryptProof()
-   * @param authz       FCL authorization function
-   */
-  async decryptAndUnwrap(
-    amount: string,
-    to: string,
-    proofResult: DecryptProofResult,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authz: any
-  ): Promise<{ txId: string; amount: bigint }> {
-    const fcl = await import("@onflow/fcl");
-    const { proof, publicInputs } = proofResult;
-
-    const proofArr = [...proof].map((v) => v.toString());
-    const pubInputsArr = [...publicInputs].map((v) => v.toString());
-
-    const txId = await fcl.mutate({
-      cadence: TX_DECRYPT_AND_UNWRAP,
-      args: (arg: unknown, typeOf: unknown) => [
-        // @ts-expect-error FCL types are dynamic
-        arg(amount, typeOf.UFix64),
-        // @ts-expect-error FCL types are dynamic
-        arg(to, typeOf.Address),
-        // @ts-expect-error FCL types are dynamic
-        arg(proofArr, typeOf.Array(typeOf.UInt256)),
-        // @ts-expect-error FCL types are dynamic
-        arg(pubInputsArr, typeOf.Array(typeOf.UInt256)),
-      ],
-      proposer: authz,
-      payer: authz,
-      authorizations: [authz],
-      limit: 9999,
-    });
-
-    await fcl.tx(txId).onceSealed();
-    return { txId, amount: proofResult.amount };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Admin: pause / unpause
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Check whether the JanusFlow router is currently paused.
-   * Paused = all user-facing write operations revert. Read operations still work.
-   *
-   * @returns true if paused, false if active
-   */
+  /** Read whether the Cadence router is paused. */
   async isPaused(): Promise<boolean> {
     const fcl = await import("@onflow/fcl");
     return fcl.query({ cadence: SCRIPT_IS_PAUSED, args: () => [] }) as Promise<boolean>;
   }
 
-  /**
-   * (Admin only) Pause the JanusFlow router — emergency stop.
-   * Caller must hold the AdminResource at /storage/janusFlowAdmin.
-   *
-   * @param authz FCL authorization function for the admin account
-   */
-  async pause(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authz: any
-  ): Promise<{ txId: string }> {
-    const fcl = await import("@onflow/fcl");
-    const txId = await fcl.mutate({
-      cadence: TX_ADMIN_PAUSE,
-      args: () => [],
-      proposer: authz,
-      payer: authz,
-      authorizations: [authz],
-      limit: 9999,
-    });
-    await fcl.tx(txId).onceSealed();
-    return { txId };
-  }
-
-  /**
-   * (Admin only) Unpause the JanusFlow router.
-   * Caller must hold the AdminResource at /storage/janusFlowAdmin.
-   *
-   * @param authz FCL authorization function for the admin account
-   */
-  async unpause(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authz: any
-  ): Promise<{ txId: string }> {
-    const fcl = await import("@onflow/fcl");
-    const txId = await fcl.mutate({
-      cadence: TX_ADMIN_UNPAUSE,
-      args: () => [],
-      proposer: authz,
-      payer: authz,
-      authorizations: [authz],
-      limit: 9999,
-    });
-    await fcl.tx(txId).onceSealed();
-    return { txId };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Admin: impl swap (48h time-lock)
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Get the version string of the currently active JanusFlowImpl.
-   * Returns a semver-like string (e.g. "0.1.0") as set by the impl contract.
-   */
+  /** Read the active impl version string ("0.3.0" for the v0.3 router). */
   async getActiveImplVersion(): Promise<string> {
     const fcl = await import("@onflow/fcl");
     return fcl.query({
@@ -697,49 +461,26 @@ export class JanusFlow {
     }) as Promise<string>;
   }
 
-  /**
-   * (Admin only) Finalize a pending impl swap after the 48h time-lock has expired.
-   * Call proposeImplSwap on-chain first (via TX_ADMIN_PROPOSE_IMPL_SWAP template).
-   * After 48h, call this method to complete the capability swap.
-   *
-   * @param authz FCL authorization function for the admin account
-   */
-  async finalizeImplSwap(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authz: any
-  ): Promise<{ txId: string }> {
+  /** Read the cumulative FLOW wrapped through this router (UFix64 string). */
+  async getTotalLocked(): Promise<string> {
     const fcl = await import("@onflow/fcl");
-    const txId = await fcl.mutate({
-      cadence: TX_ADMIN_FINALIZE_IMPL_SWAP,
+    return fcl.query({
+      cadence: SCRIPT_GET_TOTAL_LOCKED,
       args: () => [],
-      proposer: authz,
-      payer: authz,
-      authorizations: [authz],
-      limit: 9999,
-    });
-    await fcl.tx(txId).onceSealed();
-    return { txId };
+    }) as Promise<string>;
   }
 
-  /**
-   * (Admin only) Cancel a pending impl swap proposal before it is finalized.
-   *
-   * @param authz FCL authorization function for the admin account
-   */
-  async cancelImplSwap(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authz: any
-  ): Promise<{ txId: string }> {
+  /** Read the active EVM JanusFlow proxy address. */
+  async getEvmTarget(): Promise<string> {
     const fcl = await import("@onflow/fcl");
-    const txId = await fcl.mutate({
-      cadence: TX_ADMIN_CANCEL_IMPL_SWAP,
+    return fcl.query({
+      cadence: SCRIPT_GET_EVM_TARGET,
       args: () => [],
-      proposer: authz,
-      payer: authz,
-      authorizations: [authz],
-      limit: 9999,
-    });
-    await fcl.tx(txId).onceSealed();
-    return { txId };
+    }) as Promise<string>;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Re-export Point + helper types for callers that import only janus-flow
+// ---------------------------------------------------------------------------
+export type { Point };

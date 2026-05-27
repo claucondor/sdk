@@ -7,8 +7,8 @@
  *   - Local verification via snarkjs (no network)
  *   - Typed public signal handling for the ConfidentialTransfer circuit
  *
- * Deployed verifier:
- *   ConfidentialTransferVerifier.sol: 0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5 (Flow EVM testnet)
+ * Deployed verifier (v0.3):
+ *   ConfidentialTransferVerifier.sol: 0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B (Flow EVM testnet)
  */
 
 import type {
@@ -32,8 +32,8 @@ export type {
 // Deployed addresses
 // ---------------------------------------------------------------------------
 
-/** ConfidentialTransferVerifier.sol on Flow EVM testnet */
-export const VERIFIER_ADDRESS = "0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5";
+/** ConfidentialTransferVerifier.sol on Flow EVM testnet (v0.3) */
+export const VERIFIER_ADDRESS = "0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B";
 
 /** Flow EVM testnet RPC */
 export const FLOW_EVM_TESTNET_RPC = "https://testnet.evm.nodes.onflow.org";
