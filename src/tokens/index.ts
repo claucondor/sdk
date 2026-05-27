@@ -78,16 +78,32 @@ export {
   JANUS_FLOW_CADENCE_ADDRESS_PREVIOUS,
   JANUS_FLOW_CADENCE_ADDRESS_LEGACY,
   TX_WRAP,
+  TX_WRAP_FROM_COA,
   TX_SHIELDED_TRANSFER,
   TX_UNWRAP,
+  TX_UNWRAP_TO_VAULT,
   SCRIPT_GET_TOTAL_LOCKED,
   SCRIPT_GET_ACTIVE_IMPL_VERSION,
   SCRIPT_IS_PAUSED,
   SCRIPT_GET_EVM_TARGET,
   TX_ADMIN_PAUSE,
   TX_ADMIN_UNPAUSE,
+  buildWrapCalldata,
+  buildShieldedTransferCalldata,
+  buildUnwrapCalldata,
+  readCommitment,
+  readTotalLocked,
+  resolveWrapSource,
 } from "./janus-flow";
-export type { JanusFlowCadenceOptions, JanusFlowConstructorOptions } from "./janus-flow";
+export type {
+  JanusFlowCadenceOptions,
+  JanusFlowConstructorOptions,
+  WrapSource,
+  ResolveWrapSourceInput,
+  ResolveWrapSourceResult,
+  ResolveWrapSourceOk,
+  ResolveWrapSourceError,
+} from "./janus-flow";
 
 // JanusERC20 concrete ERC20-wrapping token (v0.4)
 export {

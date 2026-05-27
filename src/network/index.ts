@@ -8,6 +8,11 @@ export { NETWORK_CONFIG, createEvmProvider, createEvmWallet, configureFCL } from
 export {
   KNOWN_COAS,
   SCRIPT_GET_COA_ADDRESS,
+  TX_SETUP_COA,
   getKnownCOA,
   getCOAAddressOnChain,
+  getCoaEvmAddress,
+  hasCOA,
+  getCoaBalanceWei,
+  getFlowVaultBalanceWei,
 } from "./coa";

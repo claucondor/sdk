@@ -109,9 +109,18 @@ export {
   randomBabyJubScalar,
   flowToWei,
   weiToFlow,
+  parseFlowToWei,
+  formatWeiToFlow,
+  weiToFlowUFix64,
   assertWholeFlow,
   FLOW_DECIMALS,
   FLOW_SCALE,
+  // v0.4.1 memo encryption primitives (generic ECIES)
+  generateBabyJubKeypair,
+  pubkeyFromPrivkey,
+  computeSharedSecret,
+  encryptText,
+  decryptText,
 } from "./crypto";
 export type {
   CommitmentXY,
@@ -120,6 +129,8 @@ export type {
   ShieldedTransferProofInput,
   ShieldedTransferProofResult,
   ProofArtifactOptions,
+  BabyJubKeypair,
+  MemoCiphertext,
 } from "./crypto";
 
 // ---------------------------------------------------------------------------
@@ -127,6 +138,49 @@ export type {
 // ---------------------------------------------------------------------------
 export { NETWORK_CONFIG, createEvmProvider, createEvmWallet, configureFCL } from "./network";
 export type { FlowNetwork } from "./network";
+
+// COA helpers (v0.4.1 additive)
+export {
+  KNOWN_COAS,
+  SCRIPT_GET_COA_ADDRESS,
+  TX_SETUP_COA,
+  getKnownCOA,
+  getCOAAddressOnChain,
+  getCoaEvmAddress,
+  hasCOA,
+  getCoaBalanceWei,
+  getFlowVaultBalanceWei,
+} from "./network";
+
+// Utility formatters / validators (v0.4.1 additive)
+export {
+  formatPoint,
+  isValidFlowAddress,
+  isValidFlowAmount,
+} from "./utils";
+
+// JanusFlow helpers exposed at root (v0.4.1 additive: calldata builders,
+// static EVM reads, wrap source resolver, COA-source TX templates).
+export {
+  TX_WRAP,
+  TX_WRAP_FROM_COA,
+  TX_SHIELDED_TRANSFER,
+  TX_UNWRAP,
+  TX_UNWRAP_TO_VAULT,
+  buildWrapCalldata,
+  buildShieldedTransferCalldata,
+  buildUnwrapCalldata,
+  readCommitment,
+  readTotalLocked,
+  resolveWrapSource,
+} from "./tokens";
+export type {
+  WrapSource,
+  ResolveWrapSourceInput,
+  ResolveWrapSourceResult,
+  ResolveWrapSourceOk,
+  ResolveWrapSourceError,
+} from "./tokens";
 
 // ---------------------------------------------------------------------------
 // Module namespaces — for power users and extension authors

@@ -101,6 +101,195 @@ export const JANUS_FLOW_EXTRA_ABI = [
 ] as const;
 
 // ---------------------------------------------------------------------------
+// Calldata builders — pure functions, no signer / no provider
+//
+// These produce the hex calldata strings that the Cadence router passes
+// through to the EVM JanusFlow proxy via `coa.call(...)`. Callers are
+// responsible for stripping the leading "0x" if their Cadence side does
+// `String.decodeHex()` (the SDK's bundled TX_* templates do).
+// ---------------------------------------------------------------------------
+
+/**
+ * Build calldata for `JanusFlow.wrap(uint256[2] txCommit, uint256[8] amountProof)`.
+ * Returns hex string WITHOUT leading 0x.
+ *
+ * Async to avoid forcing ethers as an eagerly-imported dep — apps that only
+ * use SDK crypto helpers don't pay the ethers bundle cost.
+ */
+export async function buildWrapCalldata(
+  txCommit: readonly [bigint, bigint] | readonly bigint[],
+  amountProof: readonly bigint[]
+): Promise<string> {
+  const { Interface } = await import("ethers");
+  const iface = new Interface(JANUS_FLOW_EXTRA_ABI as unknown as string[]);
+  return iface
+    .encodeFunctionData("wrap", [[...txCommit], [...amountProof]])
+    .slice(2);
+}
+
+/**
+ * Build calldata for `JanusFlow.shieldedTransfer(address, uint256[6], uint256[8])`.
+ * Returns hex string WITHOUT leading 0x.
+ *
+ * NOTE: shieldedTransfer is declared on the JanusToken base ABI, not on the
+ * JanusFlow extras. We re-declare its signature locally here so apps can
+ * import this builder without pulling the full base ABI.
+ */
+const SHIELDED_TRANSFER_ABI = [
+  "function shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof) external",
+] as const;
+
+export async function buildShieldedTransferCalldata(
+  to: string,
+  publicInputs: readonly bigint[],
+  proof: readonly bigint[]
+): Promise<string> {
+  const { Interface } = await import("ethers");
+  const iface = new Interface(SHIELDED_TRANSFER_ABI as unknown as string[]);
+  return iface
+    .encodeFunctionData("shieldedTransfer", [to, [...publicInputs], [...proof]])
+    .slice(2);
+}
+
+/**
+ * Build calldata for the full `JanusFlow.unwrap(uint256, address, uint256[2],
+ * uint256[8], uint256[6], uint256[8])` signature.
+ * Returns hex string WITHOUT leading 0x.
+ */
+export async function buildUnwrapCalldata(
+  claimedAmountWei: bigint,
+  recipientEvmHex: string,
+  txCommit: readonly [bigint, bigint] | readonly bigint[],
+  amountProof: readonly bigint[],
+  transferPublicInputs: readonly bigint[],
+  transferProof: readonly bigint[]
+): Promise<string> {
+  const { Interface } = await import("ethers");
+  const iface = new Interface(JANUS_FLOW_EXTRA_ABI as unknown as string[]);
+  return iface
+    .encodeFunctionData("unwrap", [
+      claimedAmountWei,
+      recipientEvmHex,
+      [...txCommit],
+      [...amountProof],
+      [...transferPublicInputs],
+      [...transferProof],
+    ])
+    .slice(2);
+}
+
+// ---------------------------------------------------------------------------
+// Static EVM reads — provider-only, no contract instance needed
+// ---------------------------------------------------------------------------
+
+/** Browser-safe `balanceOfCommitmentXY` reader. */
+export async function readCommitment(
+  provider: import("ethers").Provider,
+  coaEvmHex: string,
+  contractAddress: string = JANUS_FLOW_EVM_ADDRESS
+): Promise<Point> {
+  const { Interface } = await import("ethers");
+  const iface = new Interface([
+    "function balanceOfCommitmentXY(address) view returns (uint256, uint256)",
+  ]);
+  const data = iface.encodeFunctionData("balanceOfCommitmentXY", [coaEvmHex]);
+  const result = await provider.call({ to: contractAddress, data });
+  const [x, y] = iface.decodeFunctionResult(
+    "balanceOfCommitmentXY",
+    result
+  );
+  return { x: BigInt(x), y: BigInt(y) };
+}
+
+/** Browser-safe `totalLocked` reader. */
+export async function readTotalLocked(
+  provider: import("ethers").Provider,
+  contractAddress: string = JANUS_FLOW_EVM_ADDRESS
+): Promise<bigint> {
+  const { Interface } = await import("ethers");
+  const iface = new Interface([
+    "function totalLocked() view returns (uint256)",
+  ]);
+  const data = iface.encodeFunctionData("totalLocked", []);
+  const result = await provider.call({ to: contractAddress, data });
+  const [v] = iface.decodeFunctionResult("totalLocked", result);
+  return BigInt(v);
+}
+
+// ---------------------------------------------------------------------------
+// Wrap source resolution — vault vs COA decision
+// ---------------------------------------------------------------------------
+
+/** Where the FLOW being wrapped comes from. */
+export type WrapSource = "vault" | "coa";
+
+export interface ResolveWrapSourceInput {
+  /** Amount to wrap, in wei. */
+  amountWei: bigint;
+  /** Signer's Cadence FlowToken.Vault balance in wei. */
+  vaultWei: bigint;
+  /** Signer's COA EVM-side balance in wei. */
+  coaWei: bigint;
+  /**
+   * Preferred source. "auto" picks vault if it can cover the amount, otherwise
+   * COA. "vault" and "coa" pin the source explicitly (and error if the chosen
+   * source can't cover the amount).
+   *
+   * @default "auto"
+   */
+  preference?: "auto" | WrapSource;
+}
+
+export interface ResolveWrapSourceError {
+  ok: false;
+  error: string;
+}
+
+export interface ResolveWrapSourceOk {
+  ok: true;
+  source: WrapSource;
+}
+
+export type ResolveWrapSourceResult = ResolveWrapSourceOk | ResolveWrapSourceError;
+
+/**
+ * Pure decision function — picks the right wrap source given the user's
+ * vault + COA balances. Apps that call this in form-state computations can
+ * rely on it being side-effect free.
+ */
+export function resolveWrapSource(input: ResolveWrapSourceInput): ResolveWrapSourceResult {
+  const { amountWei, vaultWei, coaWei, preference = "auto" } = input;
+  if (amountWei <= 0n) {
+    return { ok: false, error: "amountWei must be > 0" };
+  }
+  if (preference === "vault") {
+    if (vaultWei < amountWei) {
+      return {
+        ok: false,
+        error: `vault balance ${vaultWei} insufficient for ${amountWei}`,
+      };
+    }
+    return { ok: true, source: "vault" };
+  }
+  if (preference === "coa") {
+    if (coaWei < amountWei) {
+      return {
+        ok: false,
+        error: `COA balance ${coaWei} insufficient for ${amountWei}`,
+      };
+    }
+    return { ok: true, source: "coa" };
+  }
+  // auto — prefer vault.
+  if (vaultWei >= amountWei) return { ok: true, source: "vault" };
+  if (coaWei >= amountWei) return { ok: true, source: "coa" };
+  return {
+    ok: false,
+    error: `neither vault (${vaultWei}) nor COA (${coaWei}) can cover ${amountWei}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // JanusFlow class — concrete native-FLOW confidential token (v0.3)
 // ---------------------------------------------------------------------------
 
@@ -342,6 +531,112 @@ transaction(
             transferProof: transferProof,
             calldataHex: calldataHex
         )
+    }
+}
+`;
+
+/**
+ * Cadence tx: wrap from COA. Identical privacy semantics to TX_WRAP but the
+ * FLOW comes from the signer's Cadence Owned Account (EVM-side balance) rather
+ * than their Cadence FlowToken.Vault. Useful for users who hold FLOW on EVM —
+ * one click instead of "bridge to vault, then wrap".
+ *
+ * The temp FlowToken.Vault only exists inside this transaction's scope:
+ *   COA -> withdraw attoflow -> @FlowToken.Vault -> JanusFlow.wrap -> COA.
+ */
+export const TX_WRAP_FROM_COA = `
+import JanusFlow from 0x5dcbeb41055ec57e
+import FungibleToken from 0x9a0766d93b6608b7
+import FlowToken from 0x7e60df042a9c0868
+import EVM from 0x8c5303eaa26202d6
+
+transaction(
+    amount: UFix64,
+    txCommit: [UInt256],
+    amountProof: [UInt256],
+    calldataHex: String
+) {
+    let payment: @FlowToken.Vault
+    let signerRef: auth(BorrowValue) &Account
+
+    prepare(signer: auth(BorrowValue) &Account) {
+        self.signerRef = signer
+        let coa = signer.storage
+            .borrow<auth(EVM.Withdraw) &EVM.CadenceOwnedAccount>(from: /storage/evm)
+            ?? panic("jf_wrap_from_coa: no COA at /storage/evm")
+        let flowUnits: UInt64 = UInt64(amount * 100_000_000.0)
+        let attoflowU: UInt = UInt(flowUnits) * 10_000_000_000
+        let withdrawn <- coa.withdraw(balance: EVM.Balance(attoflow: attoflowU))
+        self.payment <- withdrawn
+    }
+
+    execute {
+        JanusFlow.wrap(
+            signer: self.signerRef,
+            vault: <- self.payment,
+            txCommit: txCommit,
+            amountProof: amountProof,
+            calldataHex: calldataHex
+        )
+    }
+}
+`;
+
+/**
+ * Cadence tx: unwrap to vault. Atomic unwrap + sweep COA -> Cadence
+ * FlowToken.Vault in a single tx — saves the user a follow-up "withdraw from
+ * COA" step. Uses a pre/post COA balance delta to handle any EVM rounding
+ * relative to the UFix64-derived claimedAmount.
+ */
+export const TX_UNWRAP_TO_VAULT = `
+import JanusFlow from 0x5dcbeb41055ec57e
+import FungibleToken from 0x9a0766d93b6608b7
+import FlowToken from 0x7e60df042a9c0868
+import EVM from 0x8c5303eaa26202d6
+
+transaction(
+    claimedAmount: UFix64,
+    txCommit: [UInt256],
+    amountProof: [UInt256],
+    transferPublicInputs: [UInt256],
+    transferProof: [UInt256],
+    calldataHex: String
+) {
+    let signerRef: auth(BorrowValue) &Account
+    let preBalance: UInt
+    let recipientEVMHex: String
+
+    prepare(signer: auth(BorrowValue) &Account) {
+        self.signerRef = signer
+        let coaSnap = signer.storage
+            .borrow<&EVM.CadenceOwnedAccount>(from: /storage/evm)
+            ?? panic("jf_unwrap_to_vault: no COA at /storage/evm")
+        self.preBalance = coaSnap.balance().attoflow
+        self.recipientEVMHex = coaSnap.address().toString()
+    }
+
+    execute {
+        JanusFlow.unwrap(
+            signer: self.signerRef,
+            claimedAmount: claimedAmount,
+            recipientEVMHex: self.recipientEVMHex,
+            txCommit: txCommit,
+            amountProof: amountProof,
+            transferPublicInputs: transferPublicInputs,
+            transferProof: transferProof,
+            calldataHex: calldataHex
+        )
+        let coa = self.signerRef.storage
+            .borrow<auth(EVM.Withdraw) &EVM.CadenceOwnedAccount>(from: /storage/evm)
+            ?? panic("jf_unwrap_to_vault: COA disappeared after unwrap")
+        let postBalance = coa.balance().attoflow
+        assert(postBalance > self.preBalance, message: "jf_unwrap_to_vault: COA balance did not increase")
+        let received: UInt = postBalance - self.preBalance
+        let withdrawn <- coa.withdraw(balance: EVM.Balance(attoflow: received))
+        let vault = self.signerRef.storage
+            .borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
+            ?? panic("jf_unwrap_to_vault: no FlowToken.Vault")
+        vault.deposit(from: <- withdrawn)
     }
 }
 `;

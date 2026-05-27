@@ -90,3 +90,195 @@ export async function getCOAAddressOnChain(
   if (!result || result === "") return null;
   return result as string;
 }
+
+// ---------------------------------------------------------------------------
+// COA helpers — public scripts via /public/evm capability
+// ---------------------------------------------------------------------------
+
+/** Cadence script — query COA EVM hex via the published /public/evm capability. */
+const SCRIPT_GET_COA_EVM_FROM_PUBLIC = `
+import EVM from 0x8c5303eaa26202d6
+
+access(all) fun main(addr: Address): String {
+    let acct = getAccount(addr)
+    let coa = acct.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
+      ?? panic("No COA at /public/evm for ".concat(addr.toString()))
+    return coa.address().toString()
+}
+`;
+
+/** Cadence script — check whether an account publishes a /public/evm COA cap. */
+const SCRIPT_HAS_COA = `
+import EVM from 0x8c5303eaa26202d6
+
+access(all) fun main(addr: Address): Bool {
+    let acct = getAccount(addr)
+    let coa = acct.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
+    return coa != nil
+}
+`;
+
+/** Cadence script — read attoFLOW balance of an account's COA. */
+const SCRIPT_GET_COA_BALANCE_WEI = `
+import EVM from 0x8c5303eaa26202d6
+
+access(all) fun main(addr: Address): UInt {
+    let acct = getAccount(addr)
+    let coa = acct.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
+      ?? panic("No COA")
+    return coa.balance().attoflow
+}
+`;
+
+/** Cadence script — read FlowToken.Vault balance (UFix64) for an account. */
+const SCRIPT_GET_VAULT_BALANCE_UFIX64 = `
+import FungibleToken from 0x9a0766d93b6608b7
+import FlowToken from 0x7e60df042a9c0868
+
+access(all) fun main(addr: Address): UFix64 {
+    let acct = getAccount(addr)
+    let vault = acct.capabilities.borrow<&{FungibleToken.Balance}>(/public/flowTokenBalance)
+      ?? panic("No FlowToken.Balance capability")
+    return vault.balance
+}
+`;
+
+/**
+ * Resolve a Flow account's COA EVM address using its published
+ * /public/evm capability. Throws if no COA is published.
+ *
+ * Prefer this over getCOAAddressOnChain when you want a normalized 0x-prefixed
+ * hex and a thrown error for missing COAs (instead of nil).
+ */
+export async function getCoaEvmAddress(
+  cadenceAddress: string,
+  _network: FlowNetwork = "testnet"
+): Promise<string> {
+  const fcl = await import("@onflow/fcl");
+  const result = (await fcl.query({
+    cadence: SCRIPT_GET_COA_EVM_FROM_PUBLIC,
+    args: (arg: unknown, typeOf: unknown) => [
+      // @ts-expect-error FCL types are dynamic
+      arg(cadenceAddress, typeOf.Address),
+    ],
+  })) as string;
+  return result.startsWith("0x") ? result : `0x${result}`;
+}
+
+/**
+ * Check whether a Flow account publishes a COA at /public/evm. Returns false
+ * on any failure (no COA, network error, missing capability).
+ */
+export async function hasCOA(
+  cadenceAddress: string,
+  _network: FlowNetwork = "testnet"
+): Promise<boolean> {
+  const fcl = await import("@onflow/fcl");
+  try {
+    const result = (await fcl.query({
+      cadence: SCRIPT_HAS_COA,
+      args: (arg: unknown, typeOf: unknown) => [
+        // @ts-expect-error FCL types are dynamic
+        arg(cadenceAddress, typeOf.Address),
+      ],
+    })) as boolean;
+    return result === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read a Flow account's COA EVM balance in wei (attoFLOW).
+ * Returns 0n on any error.
+ */
+export async function getCoaBalanceWei(
+  cadenceAddress: string,
+  _network: FlowNetwork = "testnet"
+): Promise<bigint> {
+  const fcl = await import("@onflow/fcl");
+  try {
+    const result = (await fcl.query({
+      cadence: SCRIPT_GET_COA_BALANCE_WEI,
+      args: (arg: unknown, typeOf: unknown) => [
+        // @ts-expect-error FCL types are dynamic
+        arg(cadenceAddress, typeOf.Address),
+      ],
+    })) as string;
+    return BigInt(result);
+  } catch {
+    return 0n;
+  }
+}
+
+/**
+ * Read a Flow account's FlowToken.Vault balance in wei (UFix64 -> wei
+ * via *1e18). Returns 0n on any error.
+ */
+export async function getFlowVaultBalanceWei(
+  cadenceAddress: string,
+  _network: FlowNetwork = "testnet"
+): Promise<bigint> {
+  const fcl = await import("@onflow/fcl");
+  try {
+    const result = (await fcl.query({
+      cadence: SCRIPT_GET_VAULT_BALANCE_UFIX64,
+      args: (arg: unknown, typeOf: unknown) => [
+        // @ts-expect-error FCL types are dynamic
+        arg(cadenceAddress, typeOf.Address),
+      ],
+    })) as string;
+    return parseFlowToWei(result);
+  } catch {
+    return 0n;
+  }
+}
+
+/**
+ * Parse a UFix64-style FLOW string ("12.34000000") to wei (*1e18).
+ * Truncates anything beyond 18 fractional digits.
+ */
+function parseFlowToWei(flowStr: string): bigint {
+  const trimmed = flowStr.trim();
+  const parts = trimmed.split(".");
+  const wholeStr = parts[0] || "0";
+  let fracStr = parts[1] || "";
+  while (fracStr.length < 18) fracStr += "0";
+  if (fracStr.length > 18) fracStr = fracStr.slice(0, 18);
+  const combined = wholeStr + fracStr;
+  const clean = combined.replace(/^0+/, "") || "0";
+  return BigInt(clean);
+}
+
+// ---------------------------------------------------------------------------
+// COA setup — idempotent transaction template
+// ---------------------------------------------------------------------------
+
+/**
+ * Cadence transaction template: idempotent COA setup. Creates an
+ * EVM.CadenceOwnedAccount at /storage/evm AND publishes a public capability
+ * at /public/evm if one is not already present.
+ *
+ * Safe to run multiple times — early-returns if the COA already exists.
+ *
+ * Required entitlements on the signer: SaveValue, IssueStorageCapabilityController,
+ * PublishCapability.
+ */
+export const TX_SETUP_COA = `
+import EVM from 0x8c5303eaa26202d6
+
+transaction {
+    prepare(signer: auth(SaveValue, IssueStorageCapabilityController, PublishCapability) &Account) {
+        if signer.storage.borrow<&EVM.CadenceOwnedAccount>(from: /storage/evm) != nil {
+            log("COA already exists at /storage/evm — skipping setup")
+            return
+        }
+        let coa <- EVM.createCadenceOwnedAccount()
+        log("Created COA with EVM address: ".concat(coa.address().toString()))
+        signer.storage.save(<-coa, to: /storage/evm)
+        let cap = signer.capabilities.storage.issue<&EVM.CadenceOwnedAccount>(/storage/evm)
+        signer.capabilities.publish(cap, at: /public/evm)
+        log("COA setup complete — ready for cross-VM shielded operations")
+    }
+}
+`;

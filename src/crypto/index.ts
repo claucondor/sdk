@@ -47,7 +47,23 @@ export {
   randomBabyJubScalar,
   flowToWei,
   weiToFlow,
+  parseFlowToWei,
+  formatWeiToFlow,
+  weiToFlowUFix64,
   assertWholeFlow,
   FLOW_DECIMALS,
   FLOW_SCALE,
 } from "./babyjub-utils";
+
+// v0.4.1 memo encryption primitives (generic ECIES on BabyJubJub + AES-GCM)
+export {
+  generateBabyJubKeypair,
+  pubkeyFromPrivkey,
+  computeSharedSecret,
+} from "./babyjub-keypair";
+export type { BabyJubKeypair } from "./babyjub-keypair";
+
+export { encryptText } from "./encrypt-text";
+export type { MemoCiphertext } from "./encrypt-text";
+
+export { decryptText } from "./decrypt-text";

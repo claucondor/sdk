@@ -59,6 +59,48 @@ export function weiToFlow(weiAmount: bigint): bigint {
 }
 
 /**
+ * Parse a UFix64-style FLOW string (e.g. "12.34000000") to wei (*1e18).
+ * Truncates anything beyond 18 fractional digits.
+ *
+ * @example
+ *   parseFlowToWei("1.5")             // 1500000000000000000n
+ *   parseFlowToWei("0.00000001")      // 10000000000n
+ */
+export function parseFlowToWei(flowStr: string): bigint {
+  const trimmed = flowStr.trim();
+  const parts = trimmed.split(".");
+  const wholeStr = parts[0] || "0";
+  let fracStr = parts[1] || "";
+  while (fracStr.length < 18) fracStr += "0";
+  if (fracStr.length > 18) fracStr = fracStr.slice(0, 18);
+  const combined = wholeStr + fracStr;
+  const clean = combined.replace(/^0+/, "") || "0";
+  return BigInt(clean);
+}
+
+/**
+ * Format wei as a decimal FLOW string with the given fractional precision.
+ *
+ * @example
+ *   formatWeiToFlow(1500000000000000000n)        // "1.50000000"
+ *   formatWeiToFlow(1500000000000000000n, 4)     // "1.5000"
+ */
+export function formatWeiToFlow(wei: bigint, decimals = 8): string {
+  const whole = wei / FLOW_SCALE;
+  const remainder = wei % FLOW_SCALE;
+  const fracStr = remainder.toString().padStart(18, "0").slice(0, decimals);
+  return `${whole.toString()}.${fracStr}`;
+}
+
+/**
+ * Format wei as a UFix64-safe FLOW string (always 8 fractional digits).
+ * Use this when passing FLOW amounts as Cadence UFix64 transaction arguments.
+ */
+export function weiToFlowUFix64(wei: bigint): string {
+  return formatWeiToFlow(wei, 8);
+}
+
+/**
  * Throw if `weiAmount` is not a whole multiple of SCALE.
  * Useful to fail fast before submitting a wrap that would revert on-chain.
  */
