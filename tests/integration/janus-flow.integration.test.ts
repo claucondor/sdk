@@ -1,114 +1,191 @@
 /**
- * Integration tests — JanusFlow Cadence router on Flow testnet (READ-ONLY).
+ * Integration tests — v0.3 JanusFlow on Flow EVM + Cadence testnet (READ-ONLY).
  *
- * Tests the SDK against the canonical v0.2.0-router deployment:
- *   JanusFlow Cadence (router): 0xbef3c77681c15397 (contract: JanusFlow)
- *   JanusFlowImpl:              0xbef3c77681c15397
- *   IJanusFlowImpl:             0xbef3c77681c15397
- *   Network: Flow Cadence testnet
+ * Validates the SDK against the canonical v0.3 deployment:
+ *   JanusFlow EVM proxy:           0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078
+ *   AmountDiscloseVerifier:        0xD0ED3936530258C278f5357C1dB709ad34768352
+ *   ConfidentialTransferVerifier:  0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B
+ *   BabyJub (re-used):             0x27139AFda7425f51F68D32e0A38b7D43BcB0f870
+ *   Cadence router:                0x5dcbeb41055ec57e
+ *   Network: Flow EVM testnet (chainId 545) + Cadence testnet
  *
- * These tests are READ-ONLY — no admin keys required.
+ * These tests are READ-ONLY — no private key required.
  * Run: RUN_INTEGRATION=1 npx vitest run tests/integration/janus-flow.integration.test.ts
- *
- * Deployment record: circuits/setup/deployments-router.json
- * Router e2e results: 25/25 PASS (2026-05-26)
  */
 
 import { describe, it, expect } from "vitest";
 import {
   JanusFlow,
+  JanusFlowCadence,
+  JANUS_FLOW_EVM_ADDRESS,
   JANUS_FLOW_CADENCE_ADDRESS,
   JANUS_FLOW_VERSION,
-  JANUS_FLOW_CADENCE_ADDRESS_LEGACY,
-} from "../../src/tokens/janus-flow";
+  JANUS_BABYJUB_ADDRESS,
+  AMOUNT_DISCLOSE_VERIFIER,
+  CONFIDENTIAL_TRANSFER_VERIFIER,
+  JANUS_TOKEN_OWNER_EVM,
+} from "../../src/tokens";
 
 const runIntegration = process.env.RUN_INTEGRATION === "1";
 
-// Known fresh address — no pubkey registered, empty slot
-const FRESH_CADENCE_ADDR = "0x0000000000000000000000000000000000000003";
+const BN254_FIELD_PRIME =
+  21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
-// openjanus router account (deployer of JanusFlow router)
-const ROUTER_ACCOUNT = "0xbef3c77681c15397";
+// Fresh EVM address that has never interacted with the v0.3 contract
+const FRESH_EVM = "0x0000000000000000000000000000000000000003";
 
-describe("JanusFlow integration (read-only, router pattern)", () => {
-  it("R0: SDK constants are correct for router deployment", () => {
-    expect(JANUS_FLOW_CADENCE_ADDRESS).toBe("0xbef3c77681c15397");
-    expect(JANUS_FLOW_VERSION).toBe("0.2.0-router");
-    // Legacy address must be the zombie, not the new canonical
-    expect(JANUS_FLOW_CADENCE_ADDRESS_LEGACY).toBe("0x28fef3d1d6a12800");
-    expect(JANUS_FLOW_CADENCE_ADDRESS).not.toBe(JANUS_FLOW_CADENCE_ADDRESS_LEGACY);
-  });
-
+describe("v0.3 JanusFlow EVM integration (read-only)", () => {
   it.skipIf(!runIntegration)(
-    "R1: JanusFlow router is not paused (active state after deployment)",
+    "EVM-I1: connects and address matches canonical",
     async () => {
-      const sdk = new JanusFlow({ network: "testnet" });
-      await sdk.configure();
-      const paused = await sdk.isPaused();
-      expect(paused).toBe(false);
+      const flow = new JanusFlow();
+      await flow.connect();
+      expect(flow.address.toLowerCase()).toBe(JANUS_FLOW_EVM_ADDRESS.toLowerCase());
     }
   );
 
   it.skipIf(!runIntegration)(
-    "R2: getActiveImplVersion returns a non-empty version string",
+    "EVM-I2: babyJub() returns canonical BabyJub address",
     async () => {
-      const sdk = new JanusFlow({ network: "testnet" });
-      await sdk.configure();
-      const version = await sdk.getActiveImplVersion();
-      expect(typeof version).toBe("string");
-      expect(version.length).toBeGreaterThan(0);
-      // Current impl is 0.1.0 per deployments-router.json
-      expect(version).toBe("0.1.0");
+      const flow = new JanusFlow();
+      await flow.connect();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const addr = await (flow as any)._contract().babyJub();
+      expect(String(addr).toLowerCase()).toBe(JANUS_BABYJUB_ADDRESS.toLowerCase());
     }
   );
 
   it.skipIf(!runIntegration)(
-    "R3: fresh address has identity ciphertext (c1=(0,1), c2=(0,1)) — empty slot",
+    "EVM-I3: amountDiscloseVerifier() matches canonical address",
     async () => {
-      const sdk = new JanusFlow({ network: "testnet" });
-      await sdk.configure();
-      const slot = await sdk.getSlot(FRESH_CADENCE_ADDR);
-      expect(slot.c1.x).toBe(0n);
-      expect(slot.c1.y).toBe(1n);
-      expect(slot.c2.x).toBe(0n);
-      expect(slot.c2.y).toBe(1n);
+      const flow = new JanusFlow();
+      await flow.connect();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const addr = await (flow as any)._contract().amountDiscloseVerifier();
+      expect(String(addr).toLowerCase()).toBe(AMOUNT_DISCLOSE_VERIFIER.toLowerCase());
     }
   );
 
   it.skipIf(!runIntegration)(
-    "R4: fresh address has identity pubkey (0, 1) — not registered",
+    "EVM-I4: transferVerifier() matches canonical address",
     async () => {
-      const sdk = new JanusFlow({ network: "testnet" });
-      await sdk.configure();
-      const pk = await sdk.getPubkey(FRESH_CADENCE_ADDR);
-      expect(pk.x).toBe(0n);
-      expect(pk.y).toBe(1n);
+      const flow = new JanusFlow();
+      await flow.connect();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const addr = await (flow as any)._contract().transferVerifier();
+      expect(String(addr).toLowerCase()).toBe(
+        CONFIDENTIAL_TRANSFER_VERIFIER.toLowerCase()
+      );
+    }
+  );
+
+  it.skipIf(!runIntegration)(
+    "EVM-I5: owner() matches the admin COA",
+    async () => {
+      const flow = new JanusFlow();
+      await flow.connect();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const owner = await (flow as any)._contract().owner();
+      expect(String(owner).toLowerCase()).toBe(JANUS_TOKEN_OWNER_EVM.toLowerCase());
+    }
+  );
+
+  it.skipIf(!runIntegration)(
+    "EVM-I6: totalLocked is a non-negative bigint",
+    async () => {
+      const flow = new JanusFlow();
+      await flow.connect();
+      const v = await flow.totalLocked();
+      expect(typeof v).toBe("bigint");
+      expect(v).toBeGreaterThanOrEqual(0n);
+    }
+  );
+
+  it.skipIf(!runIntegration)(
+    "EVM-I7: maxWrap returns the bundled constant (~18 FLOW)",
+    async () => {
+      const flow = new JanusFlow();
+      await flow.connect();
+      const max = await flow.maxWrap();
+      expect(max).toBe(18_000_000_000_000_000_000n);
+    }
+  );
+
+  it.skipIf(!runIntegration)(
+    "EVM-I8: totalSupplyCommitment is a valid Point in field",
+    async () => {
+      const flow = new JanusFlow();
+      await flow.connect();
+      const p = await flow.totalSupplyCommitment();
+      expect(typeof p.x).toBe("bigint");
+      expect(typeof p.y).toBe("bigint");
+      expect(p.x).toBeLessThan(BN254_FIELD_PRIME);
+      expect(p.y).toBeLessThan(BN254_FIELD_PRIME);
+    }
+  );
+
+  it.skipIf(!runIntegration)(
+    "EVM-I9: balanceOfCommitment for a fresh address returns identity (0,1) or (0,0)",
+    async () => {
+      const flow = new JanusFlow();
+      await flow.connect();
+      const p = await flow.balanceOfCommitment(FRESH_EVM);
+      // Either identity (0,1) or uninitialized (0,0) — both treated as zero on-chain.
+      expect(p.x).toBe(0n);
+      expect([0n, 1n]).toContain(p.y);
     }
   );
 });
 
-describe("JanusFlow admin API — type and constant checks (no network)", () => {
-  it("A1: JanusFlow class exposes pause/unpause methods", () => {
-    const sdk = new JanusFlow({ network: "testnet" });
-    expect(typeof sdk.pause).toBe("function");
-    expect(typeof sdk.unpause).toBe("function");
-    expect(typeof sdk.isPaused).toBe("function");
+describe("v0.3 JanusFlow Cadence integration (read-only)", () => {
+  it("Cadence-C0: SDK constants match the v0.3 router deployment", () => {
+    expect(JANUS_FLOW_CADENCE_ADDRESS).toBe("0x5dcbeb41055ec57e");
+    expect(JANUS_FLOW_VERSION).toBe("0.3.0");
   });
 
-  it("A2: JanusFlow class exposes impl-swap methods", () => {
-    const sdk = new JanusFlow({ network: "testnet" });
-    expect(typeof sdk.finalizeImplSwap).toBe("function");
-    expect(typeof sdk.cancelImplSwap).toBe("function");
-    expect(typeof sdk.getActiveImplVersion).toBe("function");
-  });
+  it.skipIf(!runIntegration)(
+    "Cadence-C1: router is not paused",
+    async () => {
+      const c = new JanusFlowCadence({ network: "testnet" });
+      await c.configure();
+      expect(await c.isPaused()).toBe(false);
+    }
+  );
 
-  it("A3: JanusFlow class exposes user-facing methods", () => {
-    const sdk = new JanusFlow({ network: "testnet" });
-    expect(typeof sdk.registerPubkey).toBe("function");
-    expect(typeof sdk.wrapAndEncrypt).toBe("function");
-    expect(typeof sdk.confidentialTransfer).toBe("function");
-    expect(typeof sdk.decryptAndUnwrap).toBe("function");
-    expect(typeof sdk.getSlot).toBe("function");
-    expect(typeof sdk.getPubkey).toBe("function");
-  });
+  it.skipIf(!runIntegration)(
+    "Cadence-C2: getActiveImplVersion returns a semver-shaped string",
+    async () => {
+      const c = new JanusFlowCadence({ network: "testnet" });
+      await c.configure();
+      const v = await c.getActiveImplVersion();
+      expect(typeof v).toBe("string");
+      // Router upgrades preserve the activeImpl field across deploys; production
+      // value can lag behind the SDK constant. Match a semver shape, not exact.
+      expect(v).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?$/);
+    }
+  );
+
+  it.skipIf(!runIntegration)(
+    "Cadence-C3: getEvmTarget returns the v0.3 EVM proxy address",
+    async () => {
+      const c = new JanusFlowCadence({ network: "testnet" });
+      await c.configure();
+      const target = await c.getEvmTarget();
+      // EVM.EVMAddress.toString() strips the 0x prefix — compare canonical hex.
+      const normalize = (s: string) => s.toLowerCase().replace(/^0x/, "");
+      expect(normalize(target)).toBe(normalize(JANUS_FLOW_EVM_ADDRESS));
+    }
+  );
+
+  it.skipIf(!runIntegration)(
+    "Cadence-C4: getTotalLocked returns a UFix64 string",
+    async () => {
+      const c = new JanusFlowCadence({ network: "testnet" });
+      await c.configure();
+      const total = await c.getTotalLocked();
+      expect(typeof total).toBe("string");
+      // UFix64 has up to 8 decimal places — parse as float and ensure non-negative
+      expect(Number.parseFloat(total)).toBeGreaterThanOrEqual(0);
+    }
+  );
 });

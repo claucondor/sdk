@@ -1,19 +1,25 @@
 /**
- * Unit tests for JanusToken v2 module — no network required.
+ * Unit tests for JanusToken v0.3 — no network required.
  *
- * Tests the types, constants, ABIs, and class API surface of the v2 module.
- * All contract calls are mocked — no Flow EVM connection needed.
+ * Validates the abstract base API surface: addresses, ABI, class shape, and
+ * connection guards. State-changing flows are exercised via the JanusFlow
+ * concrete subclass tests + integration suite.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   JanusToken,
-  JANUS_TOKEN_TESTNET,
   JANUS_BABYJUB_ADDRESS,
-  ENCRYPT_CONSISTENCY_VERIFIER,
-  DECRYPT_OPEN_VERIFIER,
-  JANUS_TOKEN_ABI,
+  AMOUNT_DISCLOSE_VERIFIER,
+  CONFIDENTIAL_TRANSFER_VERIFIER,
+  JANUS_TOKEN_OWNER_EVM,
+  JANUS_TOKEN_BASE_ABI,
+  JANUS_TOKEN_DEPRECATED_ADDRESSES,
 } from "../../src/tokens/janus-token";
+import {
+  JANUS_FLOW_TESTNET,
+  JANUS_FLOW_EVM_ADDRESS,
+} from "../../src/tokens/janus-flow";
 
 // ---------------------------------------------------------------------------
 // Address format helpers
@@ -24,105 +30,117 @@ function isHexAddress(s: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical address assertions
+// Canonical v0.3 address assertions
 // ---------------------------------------------------------------------------
 
-describe("JANUS_TOKEN_TESTNET constant", () => {
-  it("targets the UUPS proxy address (post-SCALE-fix deploy)", () => {
-    expect(JANUS_TOKEN_TESTNET.evmAddress).toBe(
+describe("v0.3 canonical addresses", () => {
+  it("JANUS_FLOW_EVM_ADDRESS is the v0.3 proxy", () => {
+    expect(JANUS_FLOW_EVM_ADDRESS).toBe("0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078");
+    expect(isHexAddress(JANUS_FLOW_EVM_ADDRESS)).toBe(true);
+  });
+
+  it("JANUS_BABYJUB_ADDRESS is the canonical BabyJub.sol", () => {
+    expect(JANUS_BABYJUB_ADDRESS).toBe("0x27139AFda7425f51F68D32e0A38b7D43BcB0f870");
+    expect(isHexAddress(JANUS_BABYJUB_ADDRESS)).toBe(true);
+  });
+
+  it("AMOUNT_DISCLOSE_VERIFIER is the v0.3 ceremony-backed verifier", () => {
+    expect(AMOUNT_DISCLOSE_VERIFIER).toBe("0xD0ED3936530258C278f5357C1dB709ad34768352");
+    expect(isHexAddress(AMOUNT_DISCLOSE_VERIFIER)).toBe(true);
+  });
+
+  it("CONFIDENTIAL_TRANSFER_VERIFIER is set", () => {
+    expect(CONFIDENTIAL_TRANSFER_VERIFIER).toBe(
+      "0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B"
+    );
+    expect(isHexAddress(CONFIDENTIAL_TRANSFER_VERIFIER)).toBe(true);
+  });
+
+  it("JANUS_TOKEN_OWNER_EVM is the admin COA", () => {
+    expect(JANUS_TOKEN_OWNER_EVM).toBe("0x0000000000000000000000022f6b30af48a94787");
+  });
+
+  it("v0.3 addresses are all distinct", () => {
+    const addrs = new Set([
+      JANUS_FLOW_EVM_ADDRESS.toLowerCase(),
+      JANUS_BABYJUB_ADDRESS.toLowerCase(),
+      AMOUNT_DISCLOSE_VERIFIER.toLowerCase(),
+      CONFIDENTIAL_TRANSFER_VERIFIER.toLowerCase(),
+      JANUS_TOKEN_OWNER_EVM.toLowerCase(),
+    ]);
+    expect(addrs.size).toBe(5);
+  });
+
+  it("JANUS_FLOW_TESTNET wires the v0.3 verifier addresses", () => {
+    expect(JANUS_FLOW_TESTNET.evmAddress).toBe(JANUS_FLOW_EVM_ADDRESS);
+    expect(JANUS_FLOW_TESTNET.network).toBe("testnet");
+    expect(JANUS_FLOW_TESTNET.babyJubAddress).toBe(JANUS_BABYJUB_ADDRESS);
+    expect(JANUS_FLOW_TESTNET.amountDiscloseVerifierAddress).toBe(AMOUNT_DISCLOSE_VERIFIER);
+    expect(JANUS_FLOW_TESTNET.confidentialTransferVerifierAddress).toBe(
+      CONFIDENTIAL_TRANSFER_VERIFIER
+    );
+  });
+});
+
+describe("JANUS_TOKEN_DEPRECATED_ADDRESSES", () => {
+  it("flags the v0.2 ElGamal proxy as deprecated (privacy leak)", () => {
+    expect(JANUS_TOKEN_DEPRECATED_ADDRESSES.v02ElGamalProxy).toBe(
       "0x025efe7e89acdb8F315C804BE7245F348AA9c538"
     );
   });
 
-  it("evmAddress is a valid 20-byte hex address", () => {
-    expect(isHexAddress(JANUS_TOKEN_TESTNET.evmAddress)).toBe(true);
-  });
-
-  it("network is testnet", () => {
-    expect(JANUS_TOKEN_TESTNET.network).toBe("testnet");
-  });
-
-  it("babyJubAddress matches canonical deployment", () => {
-    expect(JANUS_TOKEN_TESTNET.babyJubAddress).toBe(JANUS_BABYJUB_ADDRESS);
-  });
-
-  it("encryptVerifierAddress matches canonical deployment", () => {
-    expect(JANUS_TOKEN_TESTNET.encryptVerifierAddress).toBe(ENCRYPT_CONSISTENCY_VERIFIER);
-  });
-
-  it("decryptVerifierAddress matches canonical deployment", () => {
-    expect(JANUS_TOKEN_TESTNET.decryptVerifierAddress).toBe(DECRYPT_OPEN_VERIFIER);
-  });
-});
-
-describe("Canonical v2 addresses", () => {
-  it("JANUS_BABYJUB_ADDRESS is valid hex address", () => {
-    expect(isHexAddress(JANUS_BABYJUB_ADDRESS)).toBe(true);
-    expect(JANUS_BABYJUB_ADDRESS).toBe("0x27139AFda7425f51F68D32e0A38b7D43BcB0f870");
-  });
-
-  it("ENCRYPT_CONSISTENCY_VERIFIER is valid hex address (v0.2.0 ceremony-backed)", () => {
-    expect(isHexAddress(ENCRYPT_CONSISTENCY_VERIFIER)).toBe(true);
-    expect(ENCRYPT_CONSISTENCY_VERIFIER).toBe(
-      "0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e"
+  it("does NOT match any active v0.3 address", () => {
+    const deprecated = Object.values(JANUS_TOKEN_DEPRECATED_ADDRESSES).map((a) =>
+      a.toLowerCase()
     );
-  });
-
-  it("DECRYPT_OPEN_VERIFIER is valid hex address (v0.2.0 ceremony-backed)", () => {
-    expect(isHexAddress(DECRYPT_OPEN_VERIFIER)).toBe(true);
-    expect(DECRYPT_OPEN_VERIFIER).toBe("0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc");
-  });
-
-  it("all three addresses are distinct", () => {
-    const addrs = new Set([
-      JANUS_TOKEN_TESTNET.evmAddress.toLowerCase(),
-      JANUS_BABYJUB_ADDRESS.toLowerCase(),
-      ENCRYPT_CONSISTENCY_VERIFIER.toLowerCase(),
-      DECRYPT_OPEN_VERIFIER.toLowerCase(),
-    ]);
-    expect(addrs.size).toBe(4);
+    expect(deprecated).not.toContain(JANUS_FLOW_EVM_ADDRESS.toLowerCase());
+    expect(deprecated).not.toContain(AMOUNT_DISCLOSE_VERIFIER.toLowerCase());
+    expect(deprecated).not.toContain(CONFIDENTIAL_TRANSFER_VERIFIER.toLowerCase());
   });
 });
 
-describe("JANUS_TOKEN_ABI", () => {
+// ---------------------------------------------------------------------------
+// ABI surface
+// ---------------------------------------------------------------------------
+
+describe("JANUS_TOKEN_BASE_ABI", () => {
   it("is a non-empty array", () => {
-    expect(Array.isArray(JANUS_TOKEN_ABI)).toBe(true);
-    expect(JANUS_TOKEN_ABI.length).toBeGreaterThan(0);
+    expect(Array.isArray(JANUS_TOKEN_BASE_ABI)).toBe(true);
+    expect(JANUS_TOKEN_BASE_ABI.length).toBeGreaterThan(0);
   });
 
-  it("contains registerPubkey", () => {
-    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("registerPubkey"));
-    expect(entry).toBeDefined();
+  it("contains shieldedTransfer", () => {
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("shieldedTransfer"))).toBeDefined();
   });
 
-  it("contains slotOf (for reading ciphertext)", () => {
-    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("slotOf"));
-    expect(entry).toBeDefined();
+  it("contains balanceOfCommitment", () => {
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("balanceOfCommitment"))).toBeDefined();
   });
 
-  it("contains confidentialTransfer", () => {
-    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("confidentialTransfer"));
-    expect(entry).toBeDefined();
+  it("contains totalSupplyCommitment", () => {
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("totalSupplyCommitment"))).toBeDefined();
   });
 
-  it("contains unwrap (post-SCALE-fix entrypoint)", () => {
-    const entry = JANUS_TOKEN_ABI.find((e) => /\bunwrap\(/.test(e));
-    expect(entry).toBeDefined();
+  it("contains totalLocked", () => {
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("totalLocked"))).toBeDefined();
   });
 
-  it("contains wrap (payable, msg.value = N * SCALE)", () => {
-    const entry = JANUS_TOKEN_ABI.find((e) => /\bwrap\(/.test(e));
-    expect(entry).toBeDefined();
+  it("contains Wrapped event", () => {
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("Wrapped"))).toBeDefined();
   });
 
-  it("contains SCALE constant accessor (vuln 014 sanity check)", () => {
-    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("SCALE()"));
-    expect(entry).toBeDefined();
+  it("contains Unwrapped event", () => {
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("Unwrapped"))).toBeDefined();
   });
 
-  it("contains PubkeyRegistered event", () => {
-    const entry = JANUS_TOKEN_ABI.find((e) => e.includes("PubkeyRegistered"));
-    expect(entry).toBeDefined();
+  it("contains ConfidentialTransfer event", () => {
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("ConfidentialTransfer"))).toBeDefined();
+  });
+
+  it("does NOT include v0.2 ElGamal entry points (registerPubkey, slotOf, encryptTo)", () => {
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("registerPubkey"))).toBeUndefined();
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("slotOf"))).toBeUndefined();
+    expect(JANUS_TOKEN_BASE_ABI.find((e) => e.includes("encryptTo"))).toBeUndefined();
   });
 });
 
@@ -132,73 +150,44 @@ describe("JANUS_TOKEN_ABI", () => {
 
 describe("JanusToken class", () => {
   it("constructs with TokenOptions", () => {
-    const token = new JanusToken(JANUS_TOKEN_TESTNET);
+    const token = new JanusToken(JANUS_FLOW_TESTNET);
     expect(token).toBeDefined();
+    expect(token.address).toBe(JANUS_FLOW_TESTNET.evmAddress);
   });
 
-  it("address getter returns evmAddress before connect", () => {
-    const token = new JanusToken(JANUS_TOKEN_TESTNET);
-    expect(token.address).toBe(JANUS_TOKEN_TESTNET.evmAddress);
-  });
-
-  it("balanceOfCommitment alias: getBalanceCiphertext throws before connect", async () => {
-    const token = new JanusToken(JANUS_TOKEN_TESTNET);
-    await expect(token.getBalanceCiphertext("0x0000000000000000000000000000000000000001")).rejects.toThrow(
-      /not connected/
-    );
-  });
-
-  it("pubkeyOf throws before connect", async () => {
-    const token = new JanusToken(JANUS_TOKEN_TESTNET);
-    await expect(token.pubkeyOf("0x0000000000000000000000000000000000000001")).rejects.toThrow(
-      /not connected/
-    );
-  });
-
-  it("hasPubkey throws before connect", async () => {
-    const token = new JanusToken(JANUS_TOKEN_TESTNET);
-    await expect(token.hasPubkey("0x0000000000000000000000000000000000000001")).rejects.toThrow(
-      /not connected/
-    );
-  });
-
-  it("registerPubkey throws before connect", async () => {
-    const token = new JanusToken(JANUS_TOKEN_TESTNET);
-    const pk = { x: 1n, y: 1n };
-    await expect(token.registerPubkey(pk)).rejects.toThrow(/not connected/);
-  });
-
-  it("getBalanceSlot throws before connect", async () => {
-    const token = new JanusToken(JANUS_TOKEN_TESTNET);
+  it("balanceOfCommitment throws before connect", async () => {
+    const token = new JanusToken(JANUS_FLOW_TESTNET);
     await expect(
-      token.getBalanceSlot("0x0000000000000000000000000000000000000001")
+      token.balanceOfCommitment("0x0000000000000000000000000000000000000001")
     ).rejects.toThrow(/not connected/);
   });
-});
 
-// ---------------------------------------------------------------------------
-// Type validation helpers
-// ---------------------------------------------------------------------------
-
-describe("v2 types — structural checks", () => {
-  it("Ciphertext type has c1 and c2 Point fields", () => {
-    const ct = {
-      c1: { x: 0n, y: 1n },
-      c2: { x: 0n, y: 1n },
-    };
-    expect(typeof ct.c1.x).toBe("bigint");
-    expect(typeof ct.c2.y).toBe("bigint");
+  it("totalSupplyCommitment throws before connect", async () => {
+    const token = new JanusToken(JANUS_FLOW_TESTNET);
+    await expect(token.totalSupplyCommitment()).rejects.toThrow(/not connected/);
   });
 
-  it("identity ciphertext c1=(0,1) c2=(0,1) represents empty slot", () => {
-    const identity = {
-      c1: { x: 0n, y: 1n },
-      c2: { x: 0n, y: 1n },
-    };
-    // Identity check: both components are BabyJubJub identity
-    expect(identity.c1.x).toBe(0n);
-    expect(identity.c1.y).toBe(1n);
-    expect(identity.c2.x).toBe(0n);
-    expect(identity.c2.y).toBe(1n);
+  it("totalLocked throws before connect", async () => {
+    const token = new JanusToken(JANUS_FLOW_TESTNET);
+    await expect(token.totalLocked()).rejects.toThrow(/not connected/);
+  });
+
+  it("shieldedTransfer rejects malformed publicInputs/proof length", async () => {
+    const token = new JanusToken(JANUS_FLOW_TESTNET);
+    await expect(
+      token.shieldedTransfer({
+        to: "0x000000000000000000000000000000000000dead",
+        publicInputs: [1n, 2n, 3n] as readonly bigint[],
+        proof: [1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n] as readonly bigint[],
+      })
+    ).rejects.toThrow(/publicInputs must have 6/);
+
+    await expect(
+      token.shieldedTransfer({
+        to: "0x000000000000000000000000000000000000dead",
+        publicInputs: [1n, 2n, 3n, 4n, 5n, 6n] as readonly bigint[],
+        proof: [1n, 2n, 3n] as readonly bigint[],
+      })
+    ).rejects.toThrow(/proof must have 8/);
   });
 });

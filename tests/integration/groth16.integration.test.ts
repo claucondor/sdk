@@ -1,13 +1,13 @@
 /**
- * Integration tests — ConfidentialTransferVerifier on Flow EVM testnet.
+ * Integration tests — v0.3 ConfidentialTransferVerifier on Flow EVM testnet.
  *
- * Tests proof generation + on-chain verification against deployed contract:
- *   ConfidentialTransferVerifier: 0x0085F286d89af79EC59E27CD0c5CcD1c55f42Cf5
- *   Circuit artifacts: /home/oydual3/cadence-crypto-lab/modules/zk/confidential-transfer-circuit/
+ * Tests proof generation + on-chain verification against the deployed v0.3
+ * contract:
+ *   ConfidentialTransferVerifier: 0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B
+ *   Circuit artifacts: bundled in circuits/v0.3/
  *
  * Requires:
  *   - Internet access (Flow EVM testnet)
- *   - Circuit WASM + zkey in cadence-crypto-lab (read-only reference)
  *
  * Run: RUN_INTEGRATION=1 npx vitest run tests/integration/groth16.integration.test.ts
  * (this test takes ~30-60s for proof generation)
@@ -17,15 +17,19 @@ import { describe, it, expect } from "vitest";
 import { prove, proveForEVM, verifyOnChain, verifyLocally } from "../../src/primitives/groth16";
 import { computeCommitment } from "../../src/primitives/pedersen";
 import { readFileSync, existsSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PACKAGE_ROOT = resolve(__dirname, "..", "..");
 
 const SKIP = !process.env["RUN_INTEGRATION"];
 
-// Circuit artifacts (read-only reference from cadence-crypto-lab)
-const CIRCUIT_DIR =
-  "/home/oydual3/cadence-crypto-lab/modules/zk/confidential-transfer-circuit";
-const WASM_PATH = `${CIRCUIT_DIR}/circuit/build/confidential_transfer_js/confidential_transfer.wasm`;
-const ZKEY_PATH = `${CIRCUIT_DIR}/setup/confidential_transfer_final.zkey`;
-const VK_PATH = `${CIRCUIT_DIR}/setup/verification_key.json`;
+// Bundled v0.3 circuit artifacts
+const WASM_PATH = resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer.wasm");
+const ZKEY_PATH = resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer_final.zkey");
+const VK_PATH = resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer_vkey.json");
 
 const circuitExists =
   existsSync(WASM_PATH) && existsSync(ZKEY_PATH) && existsSync(VK_PATH);
@@ -114,8 +118,10 @@ describe.skipIf(SKIP || !circuitExists)(
 );
 
 describe("ConfidentialTransferVerifier (skipped without RUN_INTEGRATION=1 + circuit files)", () => {
-  it("circuit path configuration is accessible", () => {
-    expect(CIRCUIT_DIR).toContain("confidential-transfer-circuit");
+  it("bundled circuit path resolves to circuits/v0.3/", () => {
+    expect(WASM_PATH).toContain("circuits/v0.3");
+    expect(ZKEY_PATH).toContain("circuits/v0.3");
+    expect(VK_PATH).toContain("circuits/v0.3");
   });
 
   if (!circuitExists) {
