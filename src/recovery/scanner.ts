@@ -43,7 +43,10 @@ export interface RawSnapshot {
  *
  * @param userEvmAddr    EVM address to scan for (checksummed or lowercase)
  * @param provider       ethers v6 Provider connected to Flow EVM testnet
- * @param opts.fromBlock Start block (default: 0)
+ * @param opts.fromBlock - Starting block for log scan. If omitted, defaults to
+ *   `latestBlock - 9000` to stay within Flow EVM testnet's 10,000-block
+ *   eth_getLogs cap. For complete history scanning on chains without this cap,
+ *   pass fromBlock: 0 explicitly.
  * @param opts.janusFlowAddr Override JanusFlow proxy address (for testing)
  */
 export async function scanJanusFlowSnapshots(
@@ -52,7 +55,17 @@ export async function scanJanusFlowSnapshots(
   opts?: { fromBlock?: number; janusFlowAddr?: string }
 ): Promise<RawSnapshot[]> {
   const addr = opts?.janusFlowAddr ?? JANUS_FLOW_DEFAULT;
-  const fromBlock = opts?.fromBlock ?? 0;
+
+  // Default fromBlock to latestBlock - 9000 to stay within Flow EVM testnet's
+  // 10,000-block eth_getLogs cap. Callers that need full history on a chain
+  // without this restriction can pass fromBlock: 0 explicitly.
+  let fromBlock: number;
+  if (opts?.fromBlock !== undefined) {
+    fromBlock = opts.fromBlock;
+  } else {
+    const latestBlock = await provider.getBlockNumber();
+    fromBlock = Math.max(0, latestBlock - 9000);
+  }
 
   const iface = new ethers.Interface(EVENTS_ABI);
 

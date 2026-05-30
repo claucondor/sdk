@@ -4,6 +4,19 @@ All notable changes to `@openjanus/sdk` are documented here.
 
 ---
 
+## [0.5.3] — 2026-05-30
+
+### Fixed
+
+- `recovery.scanJanusFlowSnapshots`: default `fromBlock` to `latestBlock - 9000`
+  when not explicitly provided, to stay within Flow EVM testnet's 10,000-block
+  `eth_getLogs` cap. Previously the scanner defaulted to block 0 and failed with
+  `eth_getLogs over 10000 block range` on any chain that enforces this limit.
+  Callers can still pass `fromBlock: 0` explicitly to scan from genesis on chains
+  without the cap.
+
+---
+
 ## [0.4.0] — 2026-05-27
 
 ### Added (additive — no breaking changes from v0.3)
