@@ -4,6 +4,22 @@ All notable changes to `@openjanus/sdk` are documented here.
 
 ---
 
+## [0.5.4] — 2026-05-30
+
+### Changed
+
+- `recovery.scanJanusFlowSnapshots`: scanner now reads `firstSnapshotBlock(user)`
+  from the JanusFlow contract (new in impl v0.5.3) for an O(1) starting-block hint,
+  instead of defaulting to the last 9000 blocks. If the mapping returns 0 the user
+  has never interacted and the scanner returns `[]` immediately without fetching any
+  logs. Pagination is now chunked (9000 blocks/chunk) from the hint block to latest.
+  Explicit `fromBlock` override still bypasses the hint entirely.
+- `JANUS_FLOW_EVM_IMPL_ADDRESS` bumped to v0.5.3 impl:
+  `0xd6584cb2788D2eA5c3AB61fb72aa9fEaC27ae79D`
+- `JANUS_FLOW_VERSION` bumped to `"0.5.3"`.
+
+---
+
 ## [0.5.3] — 2026-05-30
 
 ### Fixed

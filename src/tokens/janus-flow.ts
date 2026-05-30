@@ -43,8 +43,8 @@ import {
 /** v0.3 JanusFlow ERC1967 proxy on Flow EVM testnet. */
 export const JANUS_FLOW_EVM_ADDRESS = "0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078";
 
-/** v0.5.2 JanusFlow implementation contract on Flow EVM testnet. */
-export const JANUS_FLOW_EVM_IMPL_ADDRESS = "0x9b454866100f985C28718Fe7d04Eedfa740e1c00";
+/** v0.5.3 JanusFlow implementation contract on Flow EVM testnet. */
+export const JANUS_FLOW_EVM_IMPL_ADDRESS = "0xd6584cb2788D2eA5c3AB61fb72aa9fEaC27ae79D";
 
 /** v0.3 Cadence router address (cross-VM wrapper around the EVM proxy — unchanged). */
 export const JANUS_FLOW_CADENCE_ADDRESS = "0x5dcbeb41055ec57e";
@@ -53,7 +53,7 @@ export const JANUS_FLOW_CADENCE_ADDRESS = "0x5dcbeb41055ec57e";
 export const JANUS_FLOW_CONTRACT_NAME = "JanusFlow";
 
 /** SDK version identifier. Tracks the SDK version (on-chain Cadence router still reports v0.3.0). */
-export const JANUS_FLOW_VERSION = "0.5.2";
+export const JANUS_FLOW_VERSION = "0.5.3";
 
 /**
  * Per-call wrap cap. v0.5: 2^128-1 attoFLOW (effectively unbounded — matches the

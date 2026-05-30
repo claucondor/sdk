@@ -37,8 +37,8 @@ describe("v0.5 JanusFlow constants", () => {
     expect(isHexAddress(JANUS_FLOW_EVM_ADDRESS)).toBe(true);
   });
 
-  it("EVM impl address is the v0.5.2 implementation", () => {
-    expect(JANUS_FLOW_EVM_IMPL_ADDRESS).toBe("0x9b454866100f985C28718Fe7d04Eedfa740e1c00");
+  it("EVM impl address is the v0.5.3 implementation", () => {
+    expect(JANUS_FLOW_EVM_IMPL_ADDRESS).toBe("0xd6584cb2788D2eA5c3AB61fb72aa9fEaC27ae79D");
     expect(isHexAddress(JANUS_FLOW_EVM_IMPL_ADDRESS)).toBe(true);
   });
 
@@ -47,8 +47,8 @@ describe("v0.5 JanusFlow constants", () => {
     expect(JANUS_FLOW_CONTRACT_NAME).toBe("JanusFlow");
   });
 
-  it("version is 0.5.2", () => {
-    expect(JANUS_FLOW_VERSION).toBe("0.5.2");
+  it("version is 0.5.3", () => {
+    expect(JANUS_FLOW_VERSION).toBe("0.5.3");
   });
 
   it("MAX_WRAP matches contract constant (2^128-1, effectively unbounded)", () => {
