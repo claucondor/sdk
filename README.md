@@ -90,31 +90,6 @@ For the visual explanation of the underlying primitives, see [PrivateTip /learn]
 
 ---
 
-## What's new in v0.5.1
-
-> **Upgrade highlight** — if you're migrating from v0.3 or v0.4, read this first.
-
-- **128-bit value range** — the circuit's `Num2Bits` range proof now covers 128
-  bits (was 64). Amounts up to `2^128 − 1` attoFLOW (3.4 × 10^20 FLOW,
-  effectively unbounded for any realistic use) are valid. The on-chain
-  `MAX_WRAP` constant reads as `type(uint128).max`.
-- **pot18 Hermez ceremony** — verifiers are backed by the `powersOfTau28_hez_final_18.ptau`
-  transcript (262,144 constraint headroom) rather than pot14 (16,384). The extra
-  headroom leaves room for stealth-address and UTXO circuits without another
-  re-ceremony.
-- **`setVerifiers()` admin function** — `JanusFlow` impl v0.5 adds `setVerifiers()`
-  so future verifier rotations are a single admin call rather than a full proxy
-  upgrade. The proxy address never changes.
-- **ShieldedNote primitive** — `encryptShieldedNote` / `decryptShieldedNote`
-  define a canonical encrypted payload that accompanies every shielded transfer.
-  Recipients can decrypt the `(amount, blinding, memo)` triple needed to spend
-  their incoming commitment. See [ShieldedNote](#shieldednote) below.
-- **Sign-derive** — `deriveBabyJubKeypairFromBytes` produces a deterministic
-  BabyJub keypair from a wallet signature via HKDF-SHA256. Same key on any
-  device. No seed phrase, no on-chain storage. See [Sign-derive](#sign-derive-multi-device-key-recovery) below.
-
----
-
 ## Privacy properties
 
 | Channel | wrap | shieldedTransfer | unwrap |
@@ -151,11 +126,11 @@ Three concrete confidential tokens ship with the SDK. Privacy semantics are
 identical across all three — the difference is the underlying asset and the
 wrapping mechanism.
 
-| Token | Underlying | Recommended for | Status |
-|---|---|---|---|
-| **`JanusFlow`** | Native FLOW | Cadence apps tipping / paying in FLOW | Production |
-| **`JanusFTCadence`** | Any FungibleToken vault | Cadence-native FT integrations | Lab-grade |
-| `JanusERC20` | ERC20 (MockUSDC on testnet) | EVM-DeFi apps | Advanced |
+| Token | Underlying | Recommended for |
+|---|---|---|
+| **`JanusFlow`** | Native FLOW | Cadence apps tipping / paying in FLOW |
+| `JanusFTCadence` | Any FungibleToken vault | Cadence-native FT integrations |
+| `JanusERC20` | ERC20 (MockUSDC on testnet) | EVM-DeFi apps |
 
 Most apps want **JanusFlow**.
 
@@ -163,10 +138,10 @@ Most apps want **JanusFlow**.
 
 ## JanusFlow — native FLOW (recommended)
 
-Deployed as a UUPS proxy at `0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078`
-(Flow EVM testnet, **address unchanged through all upgrades**) with a Cadence
-router façade at `0x5dcbeb41055ec57e`. Users sign normal Cadence transactions;
-the router orchestrates the cross-VM EVM call via the signer's COA.
+Deployed as a UUPS proxy at `0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078` on
+Flow EVM testnet, with a Cadence router façade at `0x5dcbeb41055ec57e`. Users
+sign normal Cadence transactions; the router orchestrates the cross-VM EVM call
+via the signer's COA.
 
 The full end-to-end walkthrough is in the [Quick start](#quick-start) above.
 Condensed notes on the caller's responsibilities:
@@ -176,9 +151,8 @@ Condensed notes on the caller's responsibilities:
 - **Track `oldBalance` / `oldBlinding`** across transfers. After each
   `shieldedTransfer` your new balance is `oldBalance − transferAmount` and your
   new blinding is `newBlinding` (the one you passed to `buildShieldedTransferProof`).
-- **Amount range**: `transferAmount ≤ oldBalance` and `amount ∈ [0, 2^128)`.
-  The 128-bit range is new in v0.5 — previous 64-bit proofs will fail against
-  the v0.5.1 verifier.
+- **Amount range**: `transferAmount ≤ oldBalance` and `amount ∈ [0, 2^128)` —
+  effectively unbounded for any realistic use.
 
 ### JanusFTCadence — any Cadence FungibleToken
 
@@ -195,17 +169,12 @@ const commit      = await ft.balanceOfCommitment(someAddress);
 //   await fcl.mutate({ cadence: TX_FT_WRAP, args: ... })
 ```
 
-**Lab-grade caveats**: stub crypto, opaque proof acceptance, registry locality.
-Real BabyJub homomorphic state and full Groth16 verification arrive post-v0.5
-via cross-VM calls. Unwrap is broken on the stub — use JanusFlow for production.
-
 ### JanusERC20 — ERC20 on Flow EVM (advanced)
 
 Wraps an arbitrary ERC20 underlying. Deployed at
 `0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e` (pinned to `MockUSDC` — Flow EVM
 testnet has no canonical USDC). Same shielded-transfer privacy as JanusFlow;
 the wrap boundary is `approve + transferFrom` rather than `msg.value`.
-Note: JanusERC20 uses v0.3 ceremony verifiers (`0xD0ED...`, `0x84852a...`).
 
 ```typescript
 import { JanusERC20 } from "@openjanus/sdk";
@@ -221,8 +190,6 @@ await usdc.wrap({
 });
 await usdc.shieldedTransfer({ to, publicInputs, proof });
 ```
-
-See [`MIGRATION-v0.4.md`](./MIGRATION-v0.4.md) for the full `unwrap` API.
 
 ---
 
@@ -323,76 +290,35 @@ Rabby for non-custodial encrypted messaging.
 
 ## Deployed contracts (Flow testnet)
 
-### v0.5.1 — current (pot18 ceremony)
-
 | Contract | Network | Address |
 |---|---|---|
-| JanusFlow proxy (UNCHANGED through upgrades) | Flow EVM testnet | `0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078` |
-| JanusFlow impl v0.5 (`setVerifiers`, 2^128 MAX_WRAP) | Flow EVM testnet | `0xa2607E9EAb1718a2fAf5a1328A7d3a9Aa854efff` |
-| AmountDiscloseVerifier v0.5.1 (pot18) | Flow EVM testnet | `0x9c83b2b1EFFD3bd375b9Bee93Cb618005D6A2Dc4` |
-| ConfidentialTransferVerifier v0.5.1 (pot18) | Flow EVM testnet | `0x48f791D2a4992F448Cc36F12e5500b6553e969b3` |
-| BabyJub.sol (unchanged since v0.2) | Flow EVM testnet | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` |
+| JanusFlow proxy | Flow EVM testnet | `0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078` |
+| JanusFlow impl | Flow EVM testnet | `0xa2607E9EAb1718a2fAf5a1328A7d3a9Aa854efff` |
+| AmountDiscloseVerifier | Flow EVM testnet | `0x9c83b2b1EFFD3bd375b9Bee93Cb618005D6A2Dc4` |
+| ConfidentialTransferVerifier | Flow EVM testnet | `0x48f791D2a4992F448Cc36F12e5500b6553e969b3` |
+| BabyJub.sol | Flow EVM testnet | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` |
 | JanusFlow.cdc router | Flow Cadence testnet | `0x5dcbeb41055ec57e` |
-| Owner (admin COA, EVM) | Flow EVM testnet | `0x0000000000000000000000022f6b30af48a94787` |
-
-### v0.4 — multi-token (additive over v0.5.1 base)
-
-| Contract | Network | Address |
-|---|---|---|
 | JanusFTCadence | Flow Cadence testnet | `0xbef3c77681c15397` |
 | JanusERC20 proxy | Flow EVM testnet | `0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e` |
 | JanusERC20 impl | Flow EVM testnet | `0x7FE0B05ED77E0540519B6f10DD4b4521e867590D` |
 | MockUSDC (test underlying) | Flow EVM testnet | `0x3e8973dE565743Ef9748779bE377BBE050A13C22` |
+| Admin owner (COA, EVM) | Flow EVM testnet | `0x0000000000000000000000022f6b30af48a94787` |
 
 ---
 
 ## Trusted setup
 
-The v0.5.1 verifiers are backed by a two-phase ceremony:
+The Groth16 verifiers are backed by a two-phase ceremony:
 
 - **Phase 1 (universal)**: `powersOfTau28_hez_final_18.ptau` — Hermez pot18
   transcript, 200+ contributors via the Polygon community. Canonical source:
   `https://storage.googleapis.com/zkevm/ptau/`.
-- **Phase 2 (circuit-specific)**: one named contributor
-  (`openjanus-v0.5.1-pot18-contributor-1`), entropy from `openssl rand -hex 32`
-  not logged per protocol.
+- **Phase 2 (circuit-specific)**: one named contributor, entropy from
+  `openssl rand -hex 32` not logged per protocol.
 - **Beacon randomness**: Flow VRF, testnet block `324,226,714`, block ID
   `6e470bc1fc410b1a12b72991da0a8b4d7cfc5c8872eff0a3d57ae0c8ecffdc7a`.
 - **Full provenance**: contribution hashes, beacon hash, and `ZKey Ok!` verification
-  results live in `circuits/v0.5.1/CEREMONY-RECORD.json` (shipped with the SDK).
-
----
-
-## Migration
-
-- **v0.3 → v0.4**: see [`MIGRATION-v0.3.md`](./MIGRATION-v0.3.md)
-- **v0.4 → v0.5**: see [`MIGRATION-v0.4.md`](./MIGRATION-v0.4.md)
-- **v0.5 → v0.5.1**: verifier addresses changed (pot18 re-ceremony). No API
-  changes. See `CHANGELOG.md` or `circuits/v0.5.1/CEREMONY-RECORD.json` for
-  the full diff.
-
----
-
-## Deprecated addresses (DO NOT USE)
-
-### v0.3 verifiers (replaced by v0.5.1 pot18 ceremony)
-
-| Contract | Address | Why deprecated |
-|---|---|---|
-| AmountDiscloseVerifier v0.3 | `0xD0ED3936530258C278f5357C1dB709ad34768352` | pot14 ceremony; replaced by v0.5.1 |
-| ConfidentialTransferVerifier v0.3 | `0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B` | pot14 ceremony; replaced by v0.5.1 |
-
-### v0.2 (ElGamal accumulator — leaked amount privacy)
-
-| Contract | Address | Why deprecated |
-|---|---|---|
-| JanusToken v0.2 (ElGamal) | `0x025efe7e89acdb8F315C804BE7245F348AA9c538` | `shieldedTransfer` leaked cleartext `transferUnits` |
-| EncryptConsistencyVerifier v0.2 | `0x0C1e731036f4632CF9620bf6C6BB8204eD3a3B1e` | only consumed by v0.2 proxy |
-| DecryptOpenVerifier v0.2 | `0x1c248dA94aab9f4A03005E7944a8b745a6236Dbc` | only consumed by v0.2 proxy |
-| Cadence router v0.2 | `0xbef3c77681c15397` (old contract) | bound to v0.2 EVM target |
-| Cadence Pedersen zombie v1 | `0x28fef3d1d6a12800` | Flow protocol cannot remove old contracts |
-
-See `MIGRATION-v0.3.md` for step-by-step migration from v0.2.
+  results live in `circuits/CEREMONY-RECORD.json` (shipped with the SDK).
 
 ---
 
