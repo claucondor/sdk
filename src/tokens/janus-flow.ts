@@ -11,19 +11,19 @@
  *   unwrap          : claimedAmount + recipient VISIBLE           (boundary out)
  *   shieldedTransfer: amount HIDDEN on calldata/events/storage    (full shielded)
  *
- * v0.3 production deployment (Flow EVM testnet):
- *   JanusFlow proxy:               0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078
- *   JanusFlow impl:                0x9321dF5884021D7E19Ad0EB5F582f8E2A70236eC
- *   AmountDiscloseVerifier:        0xD0ED3936530258C278f5357C1dB709ad34768352
- *   ConfidentialTransferVerifier:  0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B
- *   BabyJub (re-used):             0x27139AFda7425f51F68D32e0A38b7D43BcB0f870
- *   Owner (admin COA):             0x0000000000000000000000022f6b30af48a94787
+ * v0.5 production deployment (Flow EVM testnet):
+ *   JanusFlow proxy:               0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078  (UNCHANGED)
+ *   JanusFlow impl:                0xa2607E9EAb1718a2fAf5a1328A7d3a9Aa854efff  (v0.5)
+ *   AmountDiscloseVerifier:        0xee5Dc464e7e9782c7b04FC0bEAd0EBC2F366945b  (v0.5 ceremony)
+ *   ConfidentialTransferVerifier:  0x93cb6f84B30455CCF2154C671F96201333756D9e  (v0.5 ceremony)
+ *   BabyJub (re-used):             0x27139AFda7425f51F68D32e0A38b7D43BcB0f870  (UNCHANGED)
+ *   Owner (admin COA):             0x0000000000000000000000022f6b30af48a94787  (UNCHANGED)
  *
- * Cadence router (v0.3, cross-VM wrapper):
+ * Cadence router (v0.3, cross-VM wrapper — UNCHANGED, still calls proxy at same address):
  *   Address:        0x5dcbeb41055ec57e (router) — calls the EVM proxy via COA
  *   Contract:       JanusFlow
  *
- * MAX_WRAP per call: 18 FLOW (2^64 attoFLOW headroom for the circuit range proof).
+ * MAX_WRAP per call: 2^128-1 attoFLOW (effectively unbounded for all realistic FLOW amounts).
  */
 
 import type { Point } from "../types/commitment";
@@ -43,20 +43,24 @@ import {
 /** v0.3 JanusFlow ERC1967 proxy on Flow EVM testnet. */
 export const JANUS_FLOW_EVM_ADDRESS = "0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078";
 
-/** v0.3 JanusFlow implementation contract on Flow EVM testnet. */
-export const JANUS_FLOW_EVM_IMPL_ADDRESS = "0x9321dF5884021D7E19Ad0EB5F582f8E2A70236eC";
+/** v0.5.2 JanusFlow implementation contract on Flow EVM testnet. */
+export const JANUS_FLOW_EVM_IMPL_ADDRESS = "0x9b454866100f985C28718Fe7d04Eedfa740e1c00";
 
-/** v0.3 Cadence router address (cross-VM wrapper around the EVM proxy). */
+/** v0.3 Cadence router address (cross-VM wrapper around the EVM proxy — unchanged). */
 export const JANUS_FLOW_CADENCE_ADDRESS = "0x5dcbeb41055ec57e";
 
 /** Cadence contract name at the router address. */
 export const JANUS_FLOW_CONTRACT_NAME = "JanusFlow";
 
-/** SDK version identifier. Tracks the on-chain `getActiveImplVersion()` value. */
-export const JANUS_FLOW_VERSION = "0.3.0";
+/** SDK version identifier. Tracks the SDK version (on-chain Cadence router still reports v0.3.0). */
+export const JANUS_FLOW_VERSION = "0.5.2";
 
-/** Per-call wrap cap (matches contract's MAX_WRAP — ~18 FLOW in attoFLOW). */
-export const JANUS_FLOW_MAX_WRAP_ATTOFLOW = 18_000_000_000_000_000_000n;
+/**
+ * Per-call wrap cap. v0.5: 2^128-1 attoFLOW (effectively unbounded — matches the
+ * 128-bit Num2Bits range proof in confidential_transfer.circom v0.5).
+ * The on-chain contract's MAX_WRAP constant reads as type(uint128).max.
+ */
+export const JANUS_FLOW_MAX_WRAP_ATTOFLOW = (1n << 128n) - 1n;
 
 /** Canonical testnet TokenOptions for the v0.3 JanusFlow deployment. */
 export const JANUS_FLOW_TESTNET: TokenOptions = {
@@ -93,11 +97,23 @@ export const JANUS_FLOW_CADENCE_ADDRESS_LEGACY = "0x28fef3d1d6a12800";
 // ABI fragments specific to the JanusFlow concrete subclass (wrap/unwrap)
 // ---------------------------------------------------------------------------
 
-/** ABI fragments for JanusFlow's wrap/unwrap concrete signatures + MAX_WRAP. */
+/**
+ * ABI fragments for JanusFlow v0.5.2 concrete signatures.
+ *
+ * v0.5.2 breaking changes (old signatures removed):
+ *   - wrap: adds encryptedSnapshot, ephPubkeyX, ephPubkeyY params
+ *   - unwrap: adds encryptedSnapshot, ephPubkeyX, ephPubkeyY params
+ *   - shieldedTransfer: adds encryptedSnapshot, ephPubkeyX, ephPubkeyY params
+ *   - publishMemoKey: new function to register BabyJub pubkey on EVM
+ *   - memoKeyPubX/Y: new view mappings
+ */
 export const JANUS_FLOW_EXTRA_ABI = [
   "function MAX_WRAP() view returns (uint256)",
-  "function wrap(uint256[2] txCommit, uint256[8] amountProof) external payable",
-  "function unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof) external",
+  "function wrap(uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable",
+  "function unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
+  "function publishMemoKey(uint256 pubkeyX, uint256 pubkeyY) external",
+  "function memoKeyPubX(address) view returns (uint256)",
+  "function memoKeyPubY(address) view returns (uint256)",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -110,51 +126,82 @@ export const JANUS_FLOW_EXTRA_ABI = [
 // ---------------------------------------------------------------------------
 
 /**
- * Build calldata for `JanusFlow.wrap(uint256[2] txCommit, uint256[8] amountProof)`.
+ * Build calldata for `JanusFlow.wrap(txCommit, amountProof, encryptedSnapshot, ephPubkeyX, ephPubkeyY)`.
  * Returns hex string WITHOUT leading 0x.
  *
- * Async to avoid forcing ethers as an eagerly-imported dep — apps that only
- * use SDK crypto helpers don't pay the ethers bundle cost.
+ * v0.5.2: encryptedSnapshot + ephPubkeyX/Y are required. Pass `"0x"` and `0n`/`0n`
+ * if you don't have a snapshot (not recommended — defeats recovery).
  */
 export async function buildWrapCalldata(
   txCommit: readonly [bigint, bigint] | readonly bigint[],
-  amountProof: readonly bigint[]
+  amountProof: readonly bigint[],
+  encryptedSnapshot: Uint8Array | string = "0x",
+  ephPubkeyX: bigint = 0n,
+  ephPubkeyY: bigint = 0n
 ): Promise<string> {
-  const { Interface } = await import("ethers");
+  const { Interface, hexlify } = await import("ethers");
   const iface = new Interface(JANUS_FLOW_EXTRA_ABI as unknown as string[]);
+  const snapshotHex =
+    typeof encryptedSnapshot === "string"
+      ? encryptedSnapshot
+      : hexlify(encryptedSnapshot);
   return iface
-    .encodeFunctionData("wrap", [[...txCommit], [...amountProof]])
+    .encodeFunctionData("wrap", [
+      [...txCommit],
+      [...amountProof],
+      snapshotHex,
+      ephPubkeyX,
+      ephPubkeyY,
+    ])
     .slice(2);
 }
 
 /**
- * Build calldata for `JanusFlow.shieldedTransfer(address, uint256[6], uint256[8])`.
+ * Build calldata for `JanusFlow.shieldedTransfer(address, uint256[6], uint256[8], bytes, uint256, uint256)`.
  * Returns hex string WITHOUT leading 0x.
  *
- * NOTE: shieldedTransfer is declared on the JanusToken base ABI, not on the
- * JanusFlow extras. We re-declare its signature locally here so apps can
- * import this builder without pulling the full base ABI.
+ * v0.5.2: encryptedSnapshot is the SENDER'S residual snapshot after transfer.
+ * Pass `"0x"` and `0n`/`0n` if not using snapshots (not recommended).
+ *
+ * NOTE: shieldedTransfer signature updated to include snapshot params in v0.5.2.
  */
 const SHIELDED_TRANSFER_ABI = [
-  "function shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof) external",
+  "function shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
 ] as const;
 
 export async function buildShieldedTransferCalldata(
   to: string,
   publicInputs: readonly bigint[],
-  proof: readonly bigint[]
+  proof: readonly bigint[],
+  encryptedSnapshot: Uint8Array | string = "0x",
+  ephPubkeyX: bigint = 0n,
+  ephPubkeyY: bigint = 0n
 ): Promise<string> {
-  const { Interface } = await import("ethers");
+  const { Interface, hexlify } = await import("ethers");
   const iface = new Interface(SHIELDED_TRANSFER_ABI as unknown as string[]);
+  const snapshotHex =
+    typeof encryptedSnapshot === "string"
+      ? encryptedSnapshot
+      : hexlify(encryptedSnapshot);
   return iface
-    .encodeFunctionData("shieldedTransfer", [to, [...publicInputs], [...proof]])
+    .encodeFunctionData("shieldedTransfer", [
+      to,
+      [...publicInputs],
+      [...proof],
+      snapshotHex,
+      ephPubkeyX,
+      ephPubkeyY,
+    ])
     .slice(2);
 }
 
 /**
- * Build calldata for the full `JanusFlow.unwrap(uint256, address, uint256[2],
- * uint256[8], uint256[6], uint256[8])` signature.
+ * Build calldata for `JanusFlow.unwrap(claimedAmount, recipient, txCommit,
+ * amountProof, transferPublicInputs, transferProof, encryptedSnapshot, ephPubkeyX, ephPubkeyY)`.
  * Returns hex string WITHOUT leading 0x.
+ *
+ * v0.5.2: encryptedSnapshot is the residual shielded balance AFTER the unwrap.
+ * Pass `"0x"` and `0n`/`0n` if not using snapshots (not recommended).
  */
 export async function buildUnwrapCalldata(
   claimedAmountWei: bigint,
@@ -162,10 +209,17 @@ export async function buildUnwrapCalldata(
   txCommit: readonly [bigint, bigint] | readonly bigint[],
   amountProof: readonly bigint[],
   transferPublicInputs: readonly bigint[],
-  transferProof: readonly bigint[]
+  transferProof: readonly bigint[],
+  encryptedSnapshot: Uint8Array | string = "0x",
+  ephPubkeyX: bigint = 0n,
+  ephPubkeyY: bigint = 0n
 ): Promise<string> {
-  const { Interface } = await import("ethers");
+  const { Interface, hexlify } = await import("ethers");
   const iface = new Interface(JANUS_FLOW_EXTRA_ABI as unknown as string[]);
+  const snapshotHex =
+    typeof encryptedSnapshot === "string"
+      ? encryptedSnapshot
+      : hexlify(encryptedSnapshot);
   return iface
     .encodeFunctionData("unwrap", [
       claimedAmountWei,
@@ -174,6 +228,9 @@ export async function buildUnwrapCalldata(
       [...amountProof],
       [...transferPublicInputs],
       [...transferProof],
+      snapshotHex,
+      ephPubkeyX,
+      ephPubkeyY,
     ])
     .slice(2);
 }
@@ -320,16 +377,22 @@ export class JanusFlow extends JanusToken {
   /**
    * Wrap `amountWei` of native FLOW into the caller's shielded slot.
    *
-   * The on-chain verifier checks that `txCommit` is a Pedersen commitment of
-   * exactly `amountWei` (in attoFLOW = wei) with the supplied (private) blinding.
+   * v0.5.2: Pass `encryptedSnapshot`, `ephPubkeyX`, `ephPubkeyY` so JanusFlow
+   * emits a WrapWithSnapshot event. Omitting them defaults to empty bytes / 0n
+   * (valid but defeats recovery — the on-chain snapshot channel is bypassed).
+   *
    * Build `txCommit` + `amountProof` via `buildAmountDiscloseProof()`.
+   * Build `encryptedSnapshot` via `recovery.encryptSnapshotToSelf()`.
    *
    * msg.value is VISIBLE BY DESIGN — this is the wrap boundary.
    *
-   * @param params.amountWei    msg.value (attoFLOW). Must equal the proof's
-   *                            claimed_amount and be <= MAX_WRAP.
-   * @param params.txCommit     [Cx, Cy] — Pedersen commit of amountWei
-   * @param params.amountProof  uint256[8] — pi_b Fp2-swapped Groth16 proof
+   * @param params.amountWei          msg.value (attoFLOW). Must equal proof's
+   *                                  claimed_amount and be <= MAX_WRAP.
+   * @param params.txCommit           [Cx, Cy] — Pedersen commit of amountWei
+   * @param params.amountProof        uint256[8] — pi_b Fp2-swapped Groth16 proof
+   * @param params.encryptedSnapshot  Encrypted (balance, blinding) blob (optional)
+   * @param params.ephPubkeyX         Ephemeral pubkey X for snapshot decryption
+   * @param params.ephPubkeyY         Ephemeral pubkey Y for snapshot decryption
    */
   async wrap(params: {
     amountWei: bigint;
@@ -337,9 +400,19 @@ export class JanusFlow extends JanusToken {
     amountProof:
       | readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]
       | readonly bigint[];
+    encryptedSnapshot?: Uint8Array | string;
+    ephPubkeyX?: bigint;
+    ephPubkeyY?: bigint;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }): Promise<any> {
-    const { amountWei, txCommit, amountProof } = params;
+    const {
+      amountWei,
+      txCommit,
+      amountProof,
+      encryptedSnapshot = "0x",
+      ephPubkeyX = 0n,
+      ephPubkeyY = 0n,
+    } = params;
     if (txCommit.length !== 2) {
       throw new Error(
         `JanusFlow.wrap: txCommit must have 2 elements, got ${txCommit.length}`
@@ -358,12 +431,69 @@ export class JanusFlow extends JanusToken {
         `JanusFlow.wrap: amountWei ${amountWei} exceeds MAX_WRAP ${JANUS_FLOW_MAX_WRAP_ATTOFLOW}`
       );
     }
+    const { hexlify } = await import("ethers");
+    const snapshotHex =
+      typeof encryptedSnapshot === "string"
+        ? encryptedSnapshot
+        : hexlify(encryptedSnapshot);
     const tx = await this._contract().wrap(
       [...txCommit],
       [...amountProof],
+      snapshotHex,
+      ephPubkeyX,
+      ephPubkeyY,
       { value: amountWei }
     );
     return tx.wait();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Write: publishMemoKey — register BabyJub pubkey for snapshot decryption
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Publish the caller's BabyJub pubkey in the JanusFlow EVM mapping.
+   *
+   * Any user who wants to receive recoverable snapshots or receive shielded
+   * notes from senders who look up their pubkey must call this once.
+   *
+   * Emits `MemoKeyPublished(user, pubkeyX, pubkeyY)` on JanusFlow.sol.
+   *
+   * For the full atomic Cadence+EVM setup (recommended), use the
+   * `setup_memo_key.cdc` transaction via `TX_SETUP_MEMO_KEY`.
+   */
+  async publishMemoKey(pubkey: {
+    x: bigint;
+    y: bigint;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }): Promise<any> {
+    const tx = await this._contract().publishMemoKey(pubkey.x, pubkey.y);
+    return tx.wait();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Read: getMemoKeyPubkey — look up a user's registered BabyJub pubkey
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Read a user's registered BabyJub pubkey from the JanusFlow EVM mapping.
+   * Returns `null` if no pubkey has been registered (both x and y are 0).
+   *
+   * Senders use this to encrypt ShieldedNotes to recipients who have
+   * registered their pubkey. Recovery also uses this to identify which
+   * snapshot events to attempt decryption on.
+   */
+  async getMemoKeyPubkey(
+    userEvmAddr: string
+  ): Promise<{ x: bigint; y: bigint } | null> {
+    const [x, y] = await Promise.all([
+      this._contract().memoKeyPubX(userEvmAddr),
+      this._contract().memoKeyPubY(userEvmAddr),
+    ]);
+    const xBig = BigInt(x);
+    const yBig = BigInt(y);
+    if (xBig === 0n && yBig === 0n) return null;
+    return { x: xBig, y: yBig };
   }
 
   // ---------------------------------------------------------------------------
@@ -375,14 +505,14 @@ export class JanusFlow extends JanusToken {
    * residual commitment stays hidden — only the claimed amount + recipient
    * are leaked at the boundary.
    *
+   * v0.5.2: Pass `encryptedSnapshot`, `ephPubkeyX`, `ephPubkeyY` to emit an
+   * UnwrapWithSnapshot event capturing the residual shielded balance after the
+   * unwrap. Defaults to empty bytes / 0n (no snapshot emitted).
+   *
    * Requires TWO proofs:
    *   1. amount-disclose: `txCommit` commits to `claimedAmountWei`.
    *   2. confidential-transfer: caller's storage commitment can be split into
    *      `txCommit + C_new`.
-   *
-   * The contract enforces `transferPublicInputs[0..1] == sender's stored commitment`
-   * and `transferPublicInputs[2..3] == txCommit` — keep these consistent or
-   * the call reverts.
    *
    * @param params.claimedAmountWei  attoFLOW being released
    * @param params.recipient         EVM address that receives the FLOW
@@ -390,6 +520,8 @@ export class JanusFlow extends JanusToken {
    * @param params.amountProof       uint256[8] amount-disclose proof
    * @param params.transferPublicInputs  uint256[6] — [C_old, C_tx, C_new]
    * @param params.transferProof     uint256[8] confidential-transfer proof
+   * @param params.encryptedSnapshot  Residual snapshot after unwrap (optional)
+   * @param params.ephPubkeyX/Y      Ephemeral pubkey for snapshot decryption
    */
   async unwrap(params: {
     claimedAmountWei: bigint;
@@ -404,6 +536,9 @@ export class JanusFlow extends JanusToken {
     transferProof:
       | readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]
       | readonly bigint[];
+    encryptedSnapshot?: Uint8Array | string;
+    ephPubkeyX?: bigint;
+    ephPubkeyY?: bigint;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }): Promise<any> {
     const {
@@ -413,6 +548,9 @@ export class JanusFlow extends JanusToken {
       amountProof,
       transferPublicInputs,
       transferProof,
+      encryptedSnapshot = "0x",
+      ephPubkeyX = 0n,
+      ephPubkeyY = 0n,
     } = params;
     if (txCommit.length !== 2) throw new Error("JanusFlow.unwrap: txCommit must be length 2");
     if (amountProof.length !== 8) throw new Error("JanusFlow.unwrap: amountProof must be length 8");
@@ -423,13 +561,22 @@ export class JanusFlow extends JanusToken {
     if (claimedAmountWei <= 0n)
       throw new Error(`JanusFlow.unwrap: claimedAmountWei must be > 0, got ${claimedAmountWei}`);
 
+    const { hexlify } = await import("ethers");
+    const snapshotHex =
+      typeof encryptedSnapshot === "string"
+        ? encryptedSnapshot
+        : hexlify(encryptedSnapshot);
+
     const tx = await this._contract().unwrap(
       claimedAmountWei,
       recipient,
       [...txCommit],
       [...amountProof],
       [...transferPublicInputs],
-      [...transferProof]
+      [...transferProof],
+      snapshotHex,
+      ephPubkeyX,
+      ephPubkeyY
     );
     return tx.wait();
   }
@@ -459,8 +606,10 @@ transaction(
     calldataHex: String
 ) {
     let vault: @FlowToken.Vault
+    let signerRef: auth(BorrowValue) &Account
 
     prepare(signer: auth(BorrowValue) &Account) {
+        self.signerRef = signer
         let flowVault = signer.storage.borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(
             from: /storage/flowTokenVault
         ) ?? panic("No FlowToken.Vault in signer storage")
@@ -469,7 +618,7 @@ transaction(
 
     execute {
         JanusFlow.wrap(
-            signer: getAuthAccount<auth(BorrowValue) &Account>(0x0),
+            signer: self.signerRef,
             vault: <-self.vault,
             txCommit: txCommit,
             amountProof: amountProof,

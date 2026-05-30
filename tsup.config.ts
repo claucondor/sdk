@@ -8,6 +8,7 @@ export default defineConfig({
     "crypto/index": "src/crypto/index.ts",
     "utils/index": "src/utils/index.ts",
     "tokens/index": "src/tokens/index.ts",
+    "recovery/index": "src/recovery/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,

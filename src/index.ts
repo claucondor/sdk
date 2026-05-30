@@ -121,6 +121,13 @@ export {
   computeSharedSecret,
   encryptText,
   decryptText,
+  // v0.4.5 deterministic BabyJub keypair derivation (sign-derive pattern)
+  deriveBabyJubKeypairFromBytes,
+  // v0.4.4 shielded note (protocol payload, see crypto/shielded-note.ts)
+  encryptShieldedNote,
+  decryptShieldedNote,
+  // v0.5.2 — 128-bit Pedersen commitment (for recovery validation)
+  computeCommitmentV05,
 } from "./crypto";
 export type {
   CommitmentXY,
@@ -131,6 +138,7 @@ export type {
   ProofArtifactOptions,
   BabyJubKeypair,
   MemoCiphertext,
+  ShieldedNote,
 } from "./crypto";
 
 // ---------------------------------------------------------------------------
@@ -188,6 +196,9 @@ export type {
 export * as primitives from "./primitives";
 export * as network from "./network";
 export * as utils from "./utils";
+
+// v0.5.2 — Recovery module: reconstruct shielded state from snapshot events
+export * as recovery from "./recovery";
 
 // ---------------------------------------------------------------------------
 // Shared types — import these for TypeScript type annotations

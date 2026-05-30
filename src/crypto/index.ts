@@ -27,6 +27,9 @@ export {
 } from "./commitment";
 export type { CommitmentXY } from "./commitment";
 
+// v0.5+ Pedersen commitment (128-bit value range — used by recovery module)
+export { computeCommitmentV05 } from "../primitives/pedersen";
+
 // v0.3 amount-disclose proof (wrap + unwrap boundary)
 export { buildAmountDiscloseProof } from "./amount-disclose";
 export type {
@@ -67,3 +70,12 @@ export { encryptText } from "./encrypt-text";
 export type { MemoCiphertext } from "./encrypt-text";
 
 export { decryptText } from "./decrypt-text";
+
+// v0.4.5 — Deterministic BabyJub keypair derivation (sign-derive pattern).
+// Use with a wallet signature to recover the same MemoKey on any device.
+export { deriveBabyJubKeypairFromBytes } from "./derive-keypair";
+
+// v0.4.4 — Shielded note (protocol-level payload that EVERY JanusFlow
+// shielded transfer should attach so recipients can decrypt + unwrap).
+export { encryptShieldedNote, decryptShieldedNote } from "./shielded-note";
+export type { ShieldedNote } from "./shielded-note";

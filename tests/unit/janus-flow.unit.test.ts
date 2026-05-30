@@ -31,30 +31,30 @@ function isHexAddress(s: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(s);
 }
 
-describe("v0.3 JanusFlow constants", () => {
-  it("EVM proxy address is the v0.3 deployment", () => {
+describe("v0.5 JanusFlow constants", () => {
+  it("EVM proxy address is the v0.3 deployment (UNCHANGED)", () => {
     expect(JANUS_FLOW_EVM_ADDRESS).toBe("0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078");
     expect(isHexAddress(JANUS_FLOW_EVM_ADDRESS)).toBe(true);
   });
 
-  it("EVM impl address is the v0.3 implementation", () => {
-    expect(JANUS_FLOW_EVM_IMPL_ADDRESS).toBe("0x9321dF5884021D7E19Ad0EB5F582f8E2A70236eC");
+  it("EVM impl address is the v0.5.2 implementation", () => {
+    expect(JANUS_FLOW_EVM_IMPL_ADDRESS).toBe("0x9b454866100f985C28718Fe7d04Eedfa740e1c00");
     expect(isHexAddress(JANUS_FLOW_EVM_IMPL_ADDRESS)).toBe(true);
   });
 
-  it("Cadence router address is the v0.3 deployment", () => {
+  it("Cadence router address is the v0.3 deployment (UNCHANGED)", () => {
     expect(JANUS_FLOW_CADENCE_ADDRESS).toBe("0x5dcbeb41055ec57e");
     expect(JANUS_FLOW_CONTRACT_NAME).toBe("JanusFlow");
   });
 
-  it("version is 0.3.0", () => {
-    expect(JANUS_FLOW_VERSION).toBe("0.3.0");
+  it("version is 0.5.2", () => {
+    expect(JANUS_FLOW_VERSION).toBe("0.5.2");
   });
 
-  it("MAX_WRAP matches contract constant (18 FLOW in attoFLOW)", () => {
-    expect(JANUS_FLOW_MAX_WRAP_ATTOFLOW).toBe(18_000_000_000_000_000_000n);
-    // Less than 2^64 (the circuit range proof's upper bound)
-    expect(JANUS_FLOW_MAX_WRAP_ATTOFLOW).toBeLessThan(1n << 64n);
+  it("MAX_WRAP matches contract constant (2^128-1, effectively unbounded)", () => {
+    expect(JANUS_FLOW_MAX_WRAP_ATTOFLOW).toBe((1n << 128n) - 1n);
+    // Must be >= 2^64 (v0.5 bumped the circuit cap)
+    expect(JANUS_FLOW_MAX_WRAP_ATTOFLOW).toBeGreaterThanOrEqual(1n << 64n);
   });
 
   it("deprecated v0.2 EVM address is flagged separately", () => {

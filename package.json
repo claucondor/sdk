@@ -1,6 +1,6 @@
 {
   "name": "@openjanus/sdk",
-  "version": "0.4.1",
+  "version": "0.5.2",
   "description": "Cadence-first privacy primitives for Flow — JanusFlow (native FLOW, recommended), JanusFTCadence (any FungibleToken vault), and JanusERC20 (advanced, ERC20-wrapping on Flow EVM). Pedersen commitments, Groth16 amount-disclose + confidential-transfer proofs, cross-VM (Cadence + EVM) helpers.",
   "author": "oydual3 <claucondor@gmail.com>",
   "license": "MIT",
@@ -38,11 +38,18 @@
       "import": "./dist/tokens/index.js",
       "require": "./dist/tokens/index.cjs",
       "types": "./dist/tokens/index.d.ts"
+    },
+    "./recovery": {
+      "import": "./dist/recovery/index.js",
+      "require": "./dist/recovery/index.cjs",
+      "types": "./dist/recovery/index.d.ts"
     }
   },
   "files": [
     "dist",
     "circuits/v0.3",
+    "circuits/v0.5",
+    "circuits/v0.5.1",
     "README.md",
     "MIGRATION-v0.3.md",
     "MIGRATION-v0.4.md",
