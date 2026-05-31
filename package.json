@@ -1,6 +1,6 @@
 {
   "name": "@claucondor/sdk",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "Cadence-first privacy primitives for Flow — JanusFlow (native FLOW, recommended), JanusFTCadence (any FungibleToken vault), and JanusERC20 (advanced, ERC20-wrapping on Flow EVM). Pedersen commitments, Groth16 amount-disclose + confidential-transfer proofs, cross-VM (Cadence + EVM) helpers.",
   "author": "oydual3 <claucondor@gmail.com>",
   "license": "MIT",

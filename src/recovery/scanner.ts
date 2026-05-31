@@ -42,7 +42,7 @@ const CHUNK = 9000;
 export interface RawSnapshot {
   ciphertext: Uint8Array;
   ephPubkey: { x: bigint; y: bigint };
-  /** Unix timestamp in seconds — estimated from block number (not exact). */
+  /** Unix timestamp in seconds (block.timestamp from the EVM block that included this log). */
   timestamp: number;
   txHash: string;
   blockNumber: number;
@@ -155,7 +155,22 @@ export async function scanJanusFlowSnapshots(
   // ─── 3. Sort by block number ascending ───────────────────────────────────
   allLogs.sort((a, b) => a.blockNumber - b.blockNumber);
 
-  // ─── 4. Decode each log into a RawSnapshot ───────────────────────────────
+  // ─── 4. Fetch block timestamps (Unix seconds) for all unique block numbers ─
+  // Deduplicate block numbers to minimise RPC calls (multiple logs can share
+  // the same block). Fetch in parallel to keep extra latency low.
+  const uniqueBlockNumbers = [...new Set(allLogs.map((l) => l.blockNumber))];
+  const blockTimestampMap = new Map<number, number>();
+
+  await Promise.all(
+    uniqueBlockNumbers.map(async (bn) => {
+      const block = await provider.getBlock(bn);
+      if (block) {
+        blockTimestampMap.set(bn, block.timestamp); // block.timestamp is Unix seconds
+      }
+    })
+  );
+
+  // ─── 5. Decode each log into a RawSnapshot ───────────────────────────────
   const results: RawSnapshot[] = [];
   for (const log of allLogs) {
     try {
@@ -168,12 +183,14 @@ export async function scanJanusFlowSnapshots(
 
       const ciphertext = ethers.getBytes(encBytes);
 
+      // Use the real block.timestamp (Unix epoch seconds) so it is directly
+      // comparable with incoming deltas from Cadence storage (also Unix seconds).
+      const timestamp = blockTimestampMap.get(log.blockNumber) ?? log.blockNumber;
+
       results.push({
         ciphertext,
         ephPubkey: { x: ephX, y: ephY },
-        // Use block number as a proxy timestamp (actual block timestamp
-        // requires an extra RPC call per block — expensive at scale).
-        timestamp: log.blockNumber,
+        timestamp,
         txHash: log.transactionHash,
         blockNumber: log.blockNumber,
       });
