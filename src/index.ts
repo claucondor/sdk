@@ -181,6 +181,13 @@ export {
   readCommitment,
   readTotalLocked,
   resolveWrapSource,
+  // v0.5.4-fees fee helpers
+  computeNetWrap,
+  computeWrapFee,
+  computeNetUnwrap,
+  computeUnwrapFee,
+  getFeeBps,
+  getFeeRecipient,
 } from "./tokens";
 export type {
   WrapSource,

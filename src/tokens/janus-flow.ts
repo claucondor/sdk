@@ -11,6 +11,23 @@
  *   unwrap          : claimedAmount + recipient VISIBLE           (boundary out)
  *   shieldedTransfer: amount HIDDEN on calldata/events/storage    (full shielded)
  *
+ * Fee model (v0.5.4-fees):
+ *   - 0.1% fee (10 bps) on BOUNDARIES ONLY: wrap + unwrap.
+ *   - shieldedTransfer: NO FEE — amounts are hidden, fee computation would
+ *     break privacy.
+ *   - On wrap: user sends `grossAmount`, pays `grossAmount * 0.001` fee.
+ *     The Pedersen commitment binds to `netAmount = grossAmount * 0.999`.
+ *     The `amountProof` MUST be built for `netAmount`, not `grossAmount`.
+ *   - On unwrap: user specifies `claimedAmount` (full debit from their
+ *     commitment). Recipient receives `claimedAmount * 0.999`; the protocol
+ *     fee goes to `feeRecipient`.
+ *   - Fee accumulates in `feeRecipient` (openjanus-flow COA), unwrapped
+ *     manually by the operator.
+ *
+ * Helper: `getFeeBps(provider)` reads the current rate from chain.
+ * Helper: `computeNetWrap(grossWei, feeBps)` — pure, no provider needed.
+ * Helper: `computeNetUnwrap(claimedWei, feeBps)` — what the recipient gets.
+ *
  * v0.5 production deployment (Flow EVM testnet):
  *   JanusFlow proxy:               0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078  (UNCHANGED)
  *   JanusFlow impl:                0xa2607E9EAb1718a2fAf5a1328A7d3a9Aa854efff  (v0.5)
@@ -43,8 +60,10 @@ import {
 /** v0.3 JanusFlow ERC1967 proxy on Flow EVM testnet. */
 export const JANUS_FLOW_EVM_ADDRESS = "0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078";
 
-/** v0.5.3 JanusFlow implementation contract on Flow EVM testnet. */
-export const JANUS_FLOW_EVM_IMPL_ADDRESS = "0xd6584cb2788D2eA5c3AB61fb72aa9fEaC27ae79D";
+/** v0.5.4-fees JanusFlow implementation contract on Flow EVM testnet.
+ *  Deployed 2026-05-30. Prior v0.5.3 impl: 0xd6584cb2788D2eA5c3AB61fb72aa9fEaC27ae79D
+ */
+export const JANUS_FLOW_EVM_IMPL_ADDRESS = "0x4F0914911C2f2beb7bFf6d060F3136bbd8c57943";
 
 /** v0.3 Cadence router address (cross-VM wrapper around the EVM proxy — unchanged). */
 export const JANUS_FLOW_CADENCE_ADDRESS = "0x5dcbeb41055ec57e";
@@ -53,7 +72,7 @@ export const JANUS_FLOW_CADENCE_ADDRESS = "0x5dcbeb41055ec57e";
 export const JANUS_FLOW_CONTRACT_NAME = "JanusFlow";
 
 /** SDK version identifier. Tracks the SDK version (on-chain Cadence router still reports v0.3.0). */
-export const JANUS_FLOW_VERSION = "0.5.3";
+export const JANUS_FLOW_VERSION = "0.5.4-fees";
 
 /**
  * Per-call wrap cap. v0.5: 2^128-1 attoFLOW (effectively unbounded — matches the
@@ -98,23 +117,120 @@ export const JANUS_FLOW_CADENCE_ADDRESS_LEGACY = "0x28fef3d1d6a12800";
 // ---------------------------------------------------------------------------
 
 /**
- * ABI fragments for JanusFlow v0.5.2 concrete signatures.
+ * ABI fragments for JanusFlow v0.5.4-fees concrete signatures.
  *
- * v0.5.2 breaking changes (old signatures removed):
- *   - wrap: adds encryptedSnapshot, ephPubkeyX, ephPubkeyY params
- *   - unwrap: adds encryptedSnapshot, ephPubkeyX, ephPubkeyY params
- *   - shieldedTransfer: adds encryptedSnapshot, ephPubkeyX, ephPubkeyY params
- *   - publishMemoKey: new function to register BabyJub pubkey on EVM
- *   - memoKeyPubX/Y: new view mappings
+ * v0.5.4-fees additions (over v0.5.3):
+ *   - feeRecipient()    : view — returns current fee recipient address
+ *   - feeBps()          : view — returns current fee rate in basis points
+ *   - MAX_FEE_BPS()     : view — returns hard cap (100 = 1%)
+ *   - initFees(address, uint16) : one-time post-upgrade fee initializer (owner only)
+ *   - setFeeRecipient(address)  : owner-only fee recipient setter
+ *   - setFeeBps(uint16)         : owner-only fee rate setter (capped at MAX_FEE_BPS)
  */
 export const JANUS_FLOW_EXTRA_ABI = [
   "function MAX_WRAP() view returns (uint256)",
+  "function MAX_FEE_BPS() view returns (uint16)",
+  "function feeRecipient() view returns (address)",
+  "function feeBps() view returns (uint16)",
+  "function initFees(address recipient, uint16 bps) external",
+  "function setFeeRecipient(address newRecipient) external",
+  "function setFeeBps(uint16 newBps) external",
   "function wrap(uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable",
   "function unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
   "function publishMemoKey(uint256 pubkeyX, uint256 pubkeyY) external",
   "function memoKeyPubX(address) view returns (uint256)",
   "function memoKeyPubY(address) view returns (uint256)",
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Fee helpers — pure math (no provider required) + on-chain reads
+//
+// Fee model (v0.5.4-fees):
+//   - Wrap: user sends `grossAmount` as msg.value. netAmount = gross * (10000 - feeBps) / 10000.
+//     The ZK proof MUST bind to netAmount. Pass netAmount to buildAmountDiscloseProof().
+//   - Unwrap: user specifies `claimedAmount` (full debit). Recipient gets
+//     claimedAmount * (10000 - feeBps) / 10000. The ZK proof binds to claimedAmount.
+//   - shieldedTransfer: NO FEE — amount is hidden, fee impossible without breaking privacy.
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the net amount a user's commitment will encode after a wrap.
+ *
+ * grossAmountWei is msg.value (what the user sends).
+ * feeBps is the current on-chain rate (fetch with getFeeBps()).
+ * Returns netAmountWei — build your amountProof for THIS value, not grossAmountWei.
+ *
+ * Example: grossAmount = 5 FLOW, feeBps = 10 → netAmount = 4.995 FLOW
+ */
+export function computeNetWrap(grossAmountWei: bigint, feeBps: number): bigint {
+  if (feeBps === 0) return grossAmountWei;
+  const fee = (grossAmountWei * BigInt(feeBps)) / 10000n;
+  return grossAmountWei - fee;
+}
+
+/**
+ * Compute the fee amount that will be sent to feeRecipient on a wrap.
+ */
+export function computeWrapFee(grossAmountWei: bigint, feeBps: number): bigint {
+  if (feeBps === 0) return 0n;
+  return (grossAmountWei * BigInt(feeBps)) / 10000n;
+}
+
+/**
+ * Compute the net amount the recipient will receive after an unwrap.
+ *
+ * claimedAmountWei is the amount the user is withdrawing from their commitment.
+ * feeBps is the current on-chain rate (fetch with getFeeBps()).
+ * Returns netToRecipientWei — the actual FLOW that arrives in the recipient's wallet.
+ *
+ * Example: claimedAmount = 4 FLOW, feeBps = 10 → recipient gets 3.996 FLOW
+ */
+export function computeNetUnwrap(claimedAmountWei: bigint, feeBps: number): bigint {
+  if (feeBps === 0) return claimedAmountWei;
+  const fee = (claimedAmountWei * BigInt(feeBps)) / 10000n;
+  return claimedAmountWei - fee;
+}
+
+/**
+ * Compute the fee amount that will be sent to feeRecipient on an unwrap.
+ */
+export function computeUnwrapFee(claimedAmountWei: bigint, feeBps: number): bigint {
+  if (feeBps === 0) return 0n;
+  return (claimedAmountWei * BigInt(feeBps)) / 10000n;
+}
+
+/**
+ * Read the current feeBps from the JanusFlow proxy.
+ * Cache the result per call — this is a view call, cheap but not free.
+ *
+ * Returns a number in basis points (10 = 0.1%).
+ */
+export async function getFeeBps(
+  provider: import("ethers").Provider,
+  contractAddress: string = JANUS_FLOW_EVM_ADDRESS
+): Promise<number> {
+  const { Interface } = await import("ethers");
+  const iface = new Interface(["function feeBps() view returns (uint16)"]);
+  const data = iface.encodeFunctionData("feeBps", []);
+  const result = await provider.call({ to: contractAddress, data });
+  const [bps] = iface.decodeFunctionResult("feeBps", result);
+  return Number(bps);
+}
+
+/**
+ * Read the current feeRecipient address from the JanusFlow proxy.
+ */
+export async function getFeeRecipient(
+  provider: import("ethers").Provider,
+  contractAddress: string = JANUS_FLOW_EVM_ADDRESS
+): Promise<string> {
+  const { Interface } = await import("ethers");
+  const iface = new Interface(["function feeRecipient() view returns (address)"]);
+  const data = iface.encodeFunctionData("feeRecipient", []);
+  const result = await provider.call({ to: contractAddress, data });
+  const [addr] = iface.decodeFunctionResult("feeRecipient", result);
+  return addr as string;
+}
 
 // ---------------------------------------------------------------------------
 // Calldata builders — pure functions, no signer / no provider
@@ -370,6 +486,25 @@ export class JanusFlow extends JanusToken {
     return BigInt(v.toString());
   }
 
+  /**
+   * Read the current fee rate from the proxy (v0.5.4-fees).
+   * Returns basis points: 10 = 0.1%, 0 = no fee.
+   * Use `computeNetWrap(gross, feeBps)` and `computeNetUnwrap(claimed, feeBps)`
+   * to compute what the user actually deposits / receives.
+   */
+  async feeBps(): Promise<number> {
+    const v = await this._contract().feeBps();
+    return Number(v);
+  }
+
+  /**
+   * Read the current fee recipient address from the proxy (v0.5.4-fees).
+   */
+  async feeRecipient(): Promise<string> {
+    const addr = await this._contract().feeRecipient();
+    return addr as string;
+  }
+
   // ---------------------------------------------------------------------------
   // Write: wrap — payable; binds msg.value to a Pedersen commitment
   // ---------------------------------------------------------------------------
@@ -377,19 +512,27 @@ export class JanusFlow extends JanusToken {
   /**
    * Wrap `amountWei` of native FLOW into the caller's shielded slot.
    *
+   * v0.5.4-fees: A protocol fee of `feeBps / 10000` is deducted from
+   * `amountWei` before the proof is verified. The contract binds the
+   * Pedersen commitment to `netAmount = amountWei * (10000 - feeBps) / 10000`.
+   *
+   * IMPORTANT: Build `txCommit` and `amountProof` for the NET amount, not
+   * the gross. Use `computeNetWrap(amountWei, feeBps)` to get netAmount.
+   * Use `getFeeBps(provider)` to read the current rate (typically 10 = 0.1%).
+   *
+   * Example (0.1% fee):
+   *   grossAmount = 5 FLOW → netAmount = 4.995 FLOW
+   *   Build proof for 4.995 FLOW. Send 5 FLOW as msg.value.
+   *
    * v0.5.2: Pass `encryptedSnapshot`, `ephPubkeyX`, `ephPubkeyY` so JanusFlow
    * emits a WrapWithSnapshot event. Omitting them defaults to empty bytes / 0n
    * (valid but defeats recovery — the on-chain snapshot channel is bypassed).
    *
-   * Build `txCommit` + `amountProof` via `buildAmountDiscloseProof()`.
-   * Build `encryptedSnapshot` via `recovery.encryptSnapshotToSelf()`.
+   * msg.value (grossAmount) is VISIBLE BY DESIGN — this is the wrap boundary.
    *
-   * msg.value is VISIBLE BY DESIGN — this is the wrap boundary.
-   *
-   * @param params.amountWei          msg.value (attoFLOW). Must equal proof's
-   *                                  claimed_amount and be <= MAX_WRAP.
-   * @param params.txCommit           [Cx, Cy] — Pedersen commit of amountWei
-   * @param params.amountProof        uint256[8] — pi_b Fp2-swapped Groth16 proof
+   * @param params.amountWei          msg.value GROSS attoFLOW. Proof is for net.
+   * @param params.txCommit           [Cx, Cy] — Pedersen commit of NET amount
+   * @param params.amountProof        uint256[8] — proof for NET amount
    * @param params.encryptedSnapshot  Encrypted (balance, blinding) blob (optional)
    * @param params.ephPubkeyX         Ephemeral pubkey X for snapshot decryption
    * @param params.ephPubkeyY         Ephemeral pubkey Y for snapshot decryption
@@ -505,6 +648,17 @@ export class JanusFlow extends JanusToken {
    * residual commitment stays hidden — only the claimed amount + recipient
    * are leaked at the boundary.
    *
+   * v0.5.4-fees: A protocol fee of `feeBps / 10000` is deducted from
+   * `claimedAmountWei`. The ZK proof binds to the FULL `claimedAmountWei`
+   * (the amount spent from the commitment). The recipient receives:
+   *   netToRecipient = claimedAmountWei * (10000 - feeBps) / 10000
+   *
+   * Use `computeNetUnwrap(claimedAmountWei, feeBps)` to show the user what
+   * they will receive before they submit the tx.
+   *
+   * Example (0.1% fee):
+   *   claimedAmount = 4 FLOW → recipient gets 3.996 FLOW (fee = 0.004 FLOW)
+   *
    * v0.5.2: Pass `encryptedSnapshot`, `ephPubkeyX`, `ephPubkeyY` to emit an
    * UnwrapWithSnapshot event capturing the residual shielded balance after the
    * unwrap. Defaults to empty bytes / 0n (no snapshot emitted).
@@ -514,9 +668,9 @@ export class JanusFlow extends JanusToken {
    *   2. confidential-transfer: caller's storage commitment can be split into
    *      `txCommit + C_new`.
    *
-   * @param params.claimedAmountWei  attoFLOW being released
-   * @param params.recipient         EVM address that receives the FLOW
-   * @param params.txCommit          [Cx, Cy] of claimedAmountWei
+   * @param params.claimedAmountWei  GROSS attoFLOW withdrawn from commitment
+   * @param params.recipient         EVM address that receives net FLOW
+   * @param params.txCommit          [Cx, Cy] of claimedAmountWei (full)
    * @param params.amountProof       uint256[8] amount-disclose proof
    * @param params.transferPublicInputs  uint256[6] — [C_old, C_tx, C_new]
    * @param params.transferProof     uint256[8] confidential-transfer proof
