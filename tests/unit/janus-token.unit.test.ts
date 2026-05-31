@@ -44,14 +44,14 @@ describe("v0.3 canonical addresses", () => {
     expect(isHexAddress(JANUS_BABYJUB_ADDRESS)).toBe(true);
   });
 
-  it("AMOUNT_DISCLOSE_VERIFIER is the v0.3 ceremony-backed verifier", () => {
-    expect(AMOUNT_DISCLOSE_VERIFIER).toBe("0xD0ED3936530258C278f5357C1dB709ad34768352");
+  it("AMOUNT_DISCLOSE_VERIFIER is the v0.5.1 ceremony-backed verifier (pot18)", () => {
+    expect(AMOUNT_DISCLOSE_VERIFIER).toBe("0x9c83b2b1EFFD3bd375b9Bee93Cb618005D6A2Dc4");
     expect(isHexAddress(AMOUNT_DISCLOSE_VERIFIER)).toBe(true);
   });
 
   it("CONFIDENTIAL_TRANSFER_VERIFIER is set", () => {
     expect(CONFIDENTIAL_TRANSFER_VERIFIER).toBe(
-      "0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B"
+      "0x48f791D2a4992F448Cc36F12e5500b6553e969b3"
     );
     expect(isHexAddress(CONFIDENTIAL_TRANSFER_VERIFIER)).toBe(true);
   });

@@ -17,39 +17,55 @@
  *   [1] commit[0]   (Cx)
  *   [2] commit[1]   (Cy)
  *
- * Trusted setup (v0.3):
- *   Phase 1: Hermez pot14 (200+ contributors)
- *   Phase 2: 2 named contributors (openjanus operator + claude code contributor)
- *   Beacon : Flow VRF (RandomBeaconHistory) at testnet block 323723000
- *   Verify : see circuits/v0.3/CEREMONY-RECORD.json (sha256 chain documented)
+ * Trusted setup (v0.5.1):
+ *   Phase 1: Hermez pot18 (canonical GCS source, blake2b verified)
+ *   Phase 2: 1 named contributor (openjanus-v0.5.1-pot18-contributor-1)
+ *   Beacon : Flow VRF testnet block 324226714
+ *   Verify : see circuits/v0.5.1/CEREMONY-RECORD.json
+ *
+ * v0.5 change: amount range check bumped from [0, 2^64) to [0, 2^128) to
+ * match the updated Num2Bits(128) constraint in amount_disclose.circom.
  */
 
-import { fileURLToPath } from "url";
-import { dirname, resolve } from "path";
 import { applyPiBSwap, evmProofToUint256Array } from "../utils/pi-b-swap.js";
-import { computeCommitment } from "../primitives/pedersen.js";
+import { computeCommitmentV05 as computeCommitment } from "../primitives/pedersen.js";
 import type { Point } from "../types/commitment.js";
 import type { SnarkJSProof, ProofUint256 } from "../types/proof.js";
 
 // ---------------------------------------------------------------------------
-// Bundled circuit artifact paths
+// Bundled circuit artifact paths — RESOLVED LAZILY (Node-only)
 // ---------------------------------------------------------------------------
+// `url.fileURLToPath` is Node-only and breaks browser bundlers at parse time
+// if imported at the top level. We defer the import so the crypto barrel
+// stays browser-safe; this proof function still throws clearly if invoked
+// in a browser (no wasm file I/O available client-side).
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+interface CircuitPaths {
+  wasm: string;
+  zkey: string;
+}
 
-// dist/crypto/ → go up two levels → package root
-// src/crypto/  → go up two levels → package root (same during development)
-const PACKAGE_ROOT = resolve(__dirname, "..", "..");
+let _circuitPaths: CircuitPaths | undefined;
 
-const AMOUNT_DISCLOSE_WASM = resolve(
-  PACKAGE_ROOT,
-  "circuits/v0.3/amount_disclose.wasm"
-);
-const AMOUNT_DISCLOSE_ZKEY = resolve(
-  PACKAGE_ROOT,
-  "circuits/v0.3/amount_disclose_final.zkey"
-);
+async function getCircuitPaths(): Promise<CircuitPaths> {
+  if (typeof window !== "undefined") {
+    throw new Error(
+      "buildAmountDiscloseProof requires Node.js runtime (wasm/zkey file I/O). " +
+        "Call it from an API route or server action, not directly from a client component."
+    );
+  }
+  if (_circuitPaths) return _circuitPaths;
+  const { fileURLToPath } = await import("url");
+  const { dirname, resolve } = await import("path");
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const PACKAGE_ROOT = resolve(__dirname, "..", "..");
+  _circuitPaths = {
+    wasm: resolve(PACKAGE_ROOT, "circuits/v0.5.1/amount_disclose.wasm"),
+    zkey: resolve(PACKAGE_ROOT, "circuits/v0.5.1/amount_disclose_final.zkey"),
+  };
+  return _circuitPaths;
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -104,12 +120,17 @@ export async function buildAmountDiscloseProof(
   input: AmountDiscloseProofInput,
   options?: ProofArtifactOptions
 ): Promise<AmountDiscloseProofResult> {
-  const wasmPath = options?.wasmPath ?? AMOUNT_DISCLOSE_WASM;
-  const zkeyPath = options?.zkeyPath ?? AMOUNT_DISCLOSE_ZKEY;
+  let wasmPath = options?.wasmPath;
+  let zkeyPath = options?.zkeyPath;
+  if (!wasmPath || !zkeyPath) {
+    const paths = await getCircuitPaths();
+    wasmPath = wasmPath ?? paths.wasm;
+    zkeyPath = zkeyPath ?? paths.zkey;
+  }
 
-  if (input.amount < 0n || input.amount >= 1n << 64n) {
+  if (input.amount < 0n || input.amount >= 1n << 128n) {
     throw new RangeError(
-      `buildAmountDiscloseProof: amount must be in [0, 2^64), got ${input.amount}`
+      `buildAmountDiscloseProof: amount must be in [0, 2^128), got ${input.amount}`
     );
   }
   if (input.blinding < 0n || input.blinding >= 1n << 128n) {

@@ -1,11 +1,11 @@
-# @openjanus/sdk
+# @claucondor/sdk
 
-Privacy primitives for the Flow blockchain. Current release: **v0.5.4**.
+Privacy primitives for the Flow blockchain. Current release: **v0.5.5**.
 
 Send FLOW without revealing the amount. Run a private payroll. Accept donations
 with hidden values. All using your existing Flow wallet — no new tools required.
 
-OpenJanus is **Cadence-first**: privacy lives in Cadence-native flows that
+The Janus privacy stack is **Cadence-first**: privacy lives in Cadence-native flows that
 settle through Flow EVM. The EVM is the implementation detail, not the product
 surface. Think of it as a doorway: you stand on the Cadence side, and the ZK
 machinery lives quietly beneath the threshold.
@@ -19,7 +19,7 @@ machinery lives quietly beneath the threshold.
 ## Quick start
 
 ```bash
-npm install @openjanus/sdk
+npm install @claucondor/sdk
 ```
 
 ```typescript
@@ -29,7 +29,7 @@ import {
   buildShieldedTransferProof,
   generateBlinding,
   flowToWei,
-} from "@openjanus/sdk";
+} from "@claucondor/sdk";
 import { ethers } from "ethers";
 
 // 1. Connect
@@ -90,7 +90,7 @@ await flow.unwrap({
 });
 ```
 
-For the visual explanation of the underlying primitives, see [PrivateTip /learn](https://github.com/openjanus/private-tip).
+For the visual explanation of the underlying primitives, see [PrivateTip /learn](https://github.com/claucondor/private-tip).
 
 > **Fee model**: wrap and unwrap each carry a **0.1% boundary fee** (10 bps, hard
 > cap 100 bps). Shielded transfers between accounts are **free** — no fee is taken
@@ -132,7 +132,7 @@ independently leak the amount. This is a property of EVM, not of this contract.
 ## Install
 
 ```bash
-npm install @openjanus/sdk
+npm install @claucondor/sdk
 ```
 
 Peer dependencies (installed automatically):
@@ -183,7 +183,7 @@ Condensed notes on the caller's responsibilities:
 Cadence-only confidential-amount wrapper. Deployed at `0xbef3c77681c15397`.
 
 ```typescript
-import { JanusFTCadence, TX_FT_WRAP, TX_FT_SHIELDED_TRANSFER } from "@openjanus/sdk";
+import { JanusFTCadence, TX_FT_WRAP, TX_FT_SHIELDED_TRANSFER } from "@claucondor/sdk";
 
 const ft = await new JanusFTCadence({ network: "testnet" }).configure();
 const totalLocked = await ft.getTotalLocked();
@@ -201,7 +201,7 @@ testnet has no canonical USDC). Same shielded-transfer privacy as JanusFlow;
 the wrap boundary is `approve + transferFrom` rather than `msg.value`.
 
 ```typescript
-import { JanusERC20 } from "@openjanus/sdk";
+import { JanusERC20 } from "@claucondor/sdk";
 
 const usdc = new JanusERC20();
 await usdc.connectWithSigner(wallet);
@@ -229,7 +229,7 @@ import {
   encryptShieldedNote,
   decryptShieldedNote,
   generateBabyJubKeypair,
-} from "@openjanus/sdk";
+} from "@claucondor/sdk";
 
 // Sender: encrypt the note to the recipient's BabyJub pubkey
 const note = {
@@ -253,7 +253,7 @@ The wire format is versioned JSON (`{"v":1,"a":"...","b":"...","d":"..."}`)
 encrypted with ECIES + AES-GCM over BabyJubJub.
 
 PrivateTip uses this to carry the memo text + blinding end-to-end. For the
-theory, see the `/learn` page in the [PrivateTip demo](https://github.com/openjanus/private-tip).
+theory, see the `/learn` page in the [PrivateTip demo](https://github.com/claucondor/private-tip).
 
 ---
 
@@ -265,11 +265,11 @@ pattern solves this: derive the MemoKey deterministically from a wallet signatur
 so any device with the same wallet recovers the same key.
 
 ```typescript
-import { deriveBabyJubKeypairFromBytes } from "@openjanus/sdk";
+import { deriveBabyJubKeypairFromBytes } from "@claucondor/sdk";
 import { ethers } from "ethers";
 
 // Prompt the user to sign a fixed message — the signature is the entropy source
-const sig      = await wallet.signMessage("OpenJanus MemoKey v1");
+const sig      = await wallet.signMessage("Janus MemoKey v1");
 const sigBytes = ethers.getBytes(sig);   // 65-byte Uint8Array
 
 // Same wallet → same keypair, on any device, forever
@@ -297,7 +297,7 @@ Rabby for non-custodial encrypted messaging.
 ## Module structure
 
 ```
-@openjanus/sdk
+@claucondor/sdk
 ├── tokens/      JanusToken (abstract), JanusFlow (recommended),
 │                 JanusFTCadence, JanusFlowCadence (router helper),
 │                 JanusERC20 (advanced)

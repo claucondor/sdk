@@ -19,13 +19,18 @@
  * This module is GENERIC — it has no app-specific concepts (no "tip", no "payroll").
  * Apps compose this primitive into their own UX.
  *
- * v0.3 production deployment (Flow EVM testnet):
+ * v0.5 production deployment (Flow EVM testnet):
+ *   JanusFlow proxy:               0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078  (UNCHANGED)
+ *   JanusFlow impl:                0xa2607E9EAb1718a2fAf5a1328A7d3a9Aa854efff  (v0.5, 2^128 MAX_WRAP + setVerifiers)
+ *   AmountDiscloseVerifier:        0x9c83b2b1EFFD3bd375b9Bee93Cb618005D6A2Dc4  (v0.5.1 / pot18 ceremony)
+ *   ConfidentialTransferVerifier:  0x48f791D2a4992F448Cc36F12e5500b6553e969b3  (v0.5.1 / pot18 ceremony)
+ *   BabyJub.sol (re-used):         0x27139AFda7425f51F68D32e0A38b7D43BcB0f870  (UNCHANGED)
+ *   Owner (admin COA):             0x0000000000000000000000022f6b30af48a94787  (UNCHANGED)
+ *
+ * v0.3 deployment (SUPERSEDED by v0.5):
  *   JanusFlow proxy:               0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078
- *   JanusFlow impl:                0x9321dF5884021D7E19Ad0EB5F582f8E2A70236eC
  *   AmountDiscloseVerifier:        0xD0ED3936530258C278f5357C1dB709ad34768352
  *   ConfidentialTransferVerifier:  0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B
- *   BabyJub.sol (re-used):         0x27139AFda7425f51F68D32e0A38b7D43BcB0f870
- *   Owner (admin COA):             0x0000000000000000000000022f6b30af48a94787
  *
  * v0.2 addresses (DEPRECATED — DO NOT USE — leaked amount privacy):
  *   JanusToken EVM (ElGamal):      0x025efe7e89acdb8F315C804BE7245F348AA9c538
@@ -38,24 +43,40 @@ import type { TokenOptions } from "./types";
 import { NETWORK_CONFIG } from "../network/flow-client";
 
 // ---------------------------------------------------------------------------
-// Canonical v0.3 deployment addresses (Flow EVM testnet)
+// Canonical v0.5 deployment addresses (Flow EVM testnet)
 // ---------------------------------------------------------------------------
 
-/** BabyJub.sol address (re-used from v0.2 — unchanged across the upgrade). */
+/** BabyJub.sol address (re-used — unchanged since v0.2). */
 export const JANUS_BABYJUB_ADDRESS = "0x27139AFda7425f51F68D32e0A38b7D43BcB0f870";
 
 /**
  * AmountDiscloseVerifier — Groth16 verifier that binds a Pedersen commit to
  * a public scalar amount. Used for wrap/unwrap boundary proofs.
- * v0.3: ceremony-backed (Hermez pot14 + Flow VRF beacon block 323723000).
+ * v0.5.1: ceremony-backed (Hermez pot18 + Flow VRF beacon block 324226714).
+ *         Supports amounts up to 2^128 wei (same as v0.5).
  */
-export const AMOUNT_DISCLOSE_VERIFIER = "0xD0ED3936530258C278f5357C1dB709ad34768352";
+export const AMOUNT_DISCLOSE_VERIFIER = "0x9c83b2b1EFFD3bd375b9Bee93Cb618005D6A2Dc4";
 
 /**
- * ConfidentialTransferVerifier — Groth16 verifier for the v2 transfer circuit
+ * ConfidentialTransferVerifier — Groth16 verifier for the v0.5 transfer circuit
  * proving C_new = C_old - C_tx + range-checks. Used for shieldedTransfer.
+ * v0.5.1: pot18 ceremony (Hermez pot18 + Flow VRF beacon block 324226714).
+ *         Supports balances up to 2^128 (same as v0.5).
  */
-export const CONFIDENTIAL_TRANSFER_VERIFIER = "0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B";
+export const CONFIDENTIAL_TRANSFER_VERIFIER = "0x48f791D2a4992F448Cc36F12e5500b6553e969b3";
+
+// ---------------------------------------------------------------------------
+// Superseded addresses (for archival / log archaeology)
+// ---------------------------------------------------------------------------
+export const JANUS_V05_SUPERSEDED_VERIFIERS = {
+  AmountDiscloseVerifier:       "0xee5Dc464e7e9782c7b04FC0bEAd0EBC2F366945b",  // v0.5 / pot14
+  ConfidentialTransferVerifier: "0x93cb6f84B30455CCF2154C671F96201333756D9e",  // v0.5 / pot14
+} as const;
+
+export const JANUS_V03_DEPRECATED_VERIFIERS = {
+  AmountDiscloseVerifier:       "0xD0ED3936530258C278f5357C1dB709ad34768352",
+  ConfidentialTransferVerifier: "0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B",
+} as const;
 
 /** Admin COA owner of the JanusFlow proxy on Flow EVM testnet. */
 export const JANUS_TOKEN_OWNER_EVM = "0x0000000000000000000000022f6b30af48a94787";

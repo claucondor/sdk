@@ -2,7 +2,7 @@
  * Unit tests for crypto/amount-disclose — buildAmountDiscloseProof
  *
  * Covers:
- *   - Bundled v0.3 circuit artifacts exist with correct shape (wasm magic, vkey nPublic)
+ *   - Bundled v0.5 circuit artifacts exist with correct shape (wasm magic, vkey nPublic)
  *   - Module exports re-exported via crypto/ and the top-level SDK
  *   - Pure input validation (range guards) fails fast
  *   - End-to-end real-proof generation (gated by SKIP_PROOF_TESTS=1)
@@ -19,9 +19,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PACKAGE_ROOT = resolve(__dirname, "..", "..");
 
-const AMOUNT_WASM = resolve(PACKAGE_ROOT, "circuits/v0.3/amount_disclose.wasm");
-const AMOUNT_ZKEY = resolve(PACKAGE_ROOT, "circuits/v0.3/amount_disclose_final.zkey");
-const AMOUNT_VKEY = resolve(PACKAGE_ROOT, "circuits/v0.3/amount_disclose_vkey.json");
+// v0.5.1 circuit artifacts (pot18 ceremony)
+const AMOUNT_WASM = resolve(PACKAGE_ROOT, "circuits/v0.5.1/amount_disclose.wasm");
+const AMOUNT_ZKEY = resolve(PACKAGE_ROOT, "circuits/v0.5.1/amount_disclose_final.zkey");
+const AMOUNT_VKEY = resolve(PACKAGE_ROOT, "circuits/v0.5.1/amount_disclose_vkey.json");
 
 const SKIP_PROOFS = process.env["SKIP_PROOF_TESTS"] === "1";
 
@@ -29,7 +30,7 @@ const SKIP_PROOFS = process.env["SKIP_PROOF_TESTS"] === "1";
 // Bundled artifact presence
 // ---------------------------------------------------------------------------
 
-describe("v0.3 amount-disclose circuit artifacts", () => {
+describe("v0.5.1 amount-disclose circuit artifacts", () => {
   it("amount_disclose.wasm has WASM magic bytes", () => {
     const buf = readFileSync(AMOUNT_WASM);
     expect(buf.length).toBeGreaterThan(100);
@@ -69,16 +70,35 @@ describe("amount-disclose module exports", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Input validation
+// Input validation (v0.5: amount range is [0, 2^128))
 // ---------------------------------------------------------------------------
 
 describe("buildAmountDiscloseProof input validation", () => {
-  it("rejects amount >= 2^64", async () => {
+  it("accepts amount = 2^64 without a range-guard RangeError (v0.5 128-bit cap)", async () => {
+    // v0.5 circuit uses Num2Bits(128); amounts up to 2^128-1 pass the SDK guard.
+    // 2^64 was the old rejection threshold — confirm no RangeError is thrown.
+    // (The proof will succeed; blinding=1 is a degenerate but valid witness.)
+    const { buildAmountDiscloseProof } = await import(
+      "../../src/crypto/amount-disclose.js"
+    );
+    // This should resolve without throwing /amount must be in/
+    let threw = false;
+    try {
+      await buildAmountDiscloseProof({ amount: 1n << 64n, blinding: 1n });
+    } catch (e) {
+      if (e instanceof RangeError && /amount must be in/.test(e.message)) {
+        threw = true;
+      }
+    }
+    expect(threw).toBe(false);
+  });
+
+  it("rejects amount >= 2^128", async () => {
     const { buildAmountDiscloseProof } = await import(
       "../../src/crypto/amount-disclose.js"
     );
     await expect(
-      buildAmountDiscloseProof({ amount: 1n << 64n, blinding: 1n })
+      buildAmountDiscloseProof({ amount: 1n << 128n, blinding: 1n })
     ).rejects.toThrow(/amount must be in/);
   });
 
@@ -130,7 +150,7 @@ describe.skipIf(SKIP_PROOFS)("buildAmountDiscloseProof end-to-end", () => {
       expect(result.txCommit[0]).toBe(result.commitment.x);
       expect(result.txCommit[1]).toBe(result.commitment.y);
 
-      // Off-chain verify against bundled vkey
+      // Off-chain verify against bundled v0.5 vkey
       const vk = JSON.parse(readFileSync(AMOUNT_VKEY, "utf8"));
       const ok = await snarkjs.groth16.verify(
         vk,

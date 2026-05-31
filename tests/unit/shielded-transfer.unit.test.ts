@@ -2,7 +2,7 @@
  * Unit tests for crypto/shielded-transfer — buildShieldedTransferProof
  *
  * Covers:
- *   - Bundled v0.3 ConfidentialTransfer circuit artifacts (wasm magic, vkey nPublic)
+ *   - Bundled v0.5 ConfidentialTransfer circuit artifacts (wasm magic, vkey nPublic)
  *   - Module exports re-exported via crypto/ and the top-level SDK
  *   - Pure input validation (transfer > balance, range guards)
  *   - End-to-end real-proof generation (gated by SKIP_PROOF_TESTS=1)
@@ -19,13 +19,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PACKAGE_ROOT = resolve(__dirname, "..", "..");
 
-const TRANSFER_WASM = resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer.wasm");
-const TRANSFER_ZKEY = resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer_final.zkey");
-const TRANSFER_VKEY = resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer_vkey.json");
+// v0.5.1 circuit artifacts (pot18 ceremony)
+const TRANSFER_WASM = resolve(PACKAGE_ROOT, "circuits/v0.5.1/confidential_transfer.wasm");
+const TRANSFER_ZKEY = resolve(PACKAGE_ROOT, "circuits/v0.5.1/confidential_transfer_final.zkey");
+const TRANSFER_VKEY = resolve(PACKAGE_ROOT, "circuits/v0.5.1/confidential_transfer_vkey.json");
 
 const SKIP_PROOFS = process.env["SKIP_PROOF_TESTS"] === "1";
 
-describe("v0.3 confidential-transfer artifacts", () => {
+describe("v0.5.1 confidential-transfer artifacts", () => {
   it("confidential_transfer.wasm has WASM magic bytes", () => {
     const buf = readFileSync(TRANSFER_WASM);
     expect(buf.length).toBeGreaterThan(100);
@@ -74,13 +75,36 @@ describe("buildShieldedTransferProof input validation", () => {
     ).rejects.toThrow(/transferAmount must be in/);
   });
 
-  it("rejects oldBalance >= 2^64", async () => {
+  it("accepts oldBalance = 2^64 without a range-guard RangeError (v0.5 128-bit cap)", async () => {
+    // v0.5 circuit uses LessEqThan(128) + Num2Bits(128); balances up to 2^128-1 pass the guard.
+    // 2^64 was the old rejection threshold — confirm no RangeError fires.
+    const { buildShieldedTransferProof } = await import(
+      "../../src/crypto/shielded-transfer.js"
+    );
+    let threw = false;
+    try {
+      await buildShieldedTransferProof({
+        oldBalance: 1n << 64n,
+        oldBlinding: 1n,
+        transferAmount: 1n,
+        transferBlinding: 2n,
+        newBlinding: 3n,
+      });
+    } catch (e) {
+      if (e instanceof RangeError && /oldBalance must be in/.test(e.message)) {
+        threw = true;
+      }
+    }
+    expect(threw).toBe(false);
+  });
+
+  it("rejects oldBalance >= 2^128", async () => {
     const { buildShieldedTransferProof } = await import(
       "../../src/crypto/shielded-transfer.js"
     );
     await expect(
       buildShieldedTransferProof({
-        oldBalance: 1n << 64n,
+        oldBalance: 1n << 128n,
         oldBlinding: 1n,
         transferAmount: 1n,
         transferBlinding: 2n,

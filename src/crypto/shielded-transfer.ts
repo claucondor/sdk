@@ -10,7 +10,7 @@
  *   public inputs : old_commit[2], transfer_commit[2], new_commit[2]
  *   asserts       : commitments are consistent Pedersen of (value, blinding)
  *                   transfer_value <= old_value (underflow prevention)
- *                   transfer_value in [0, 2^64) (range check via Num2Bits)
+ *                   transfer_value in [0, 2^128) (range check via Num2Bits — bumped from 2^64 in v0.5)
  *
  * publicSignals order:
  *   [0..1] old_commit (C_old)
@@ -24,30 +24,46 @@
  * Trusted setup (v0.3): see lab `cadence-crypto-lab/modules/zk/confidential-transfer-circuit`.
  */
 
-import { fileURLToPath } from "url";
-import { dirname, resolve } from "path";
 import { applyPiBSwap, evmProofToUint256Array } from "../utils/pi-b-swap.js";
-import { computeCommitment } from "../primitives/pedersen.js";
+import { computeCommitmentV05 as computeCommitment } from "../primitives/pedersen.js";
 import type { Point } from "../types/commitment.js";
 import type { SnarkJSProof, ProofUint256 } from "../types/proof.js";
 
 // ---------------------------------------------------------------------------
-// Bundled circuit artifact paths
+// Bundled circuit artifact paths — RESOLVED LAZILY (Node-only)
 // ---------------------------------------------------------------------------
+// We defer the `url`/`path` imports so that browser bundlers (Webpack/Vite)
+// don't fail at parse time on `fileURLToPath`. Browser callers can import
+// memo-encryption helpers from the same crypto barrel without crashing;
+// proof generation is server-only and throws a clear error if invoked in
+// a browser context.
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+interface CircuitPaths {
+  wasm: string;
+  zkey: string;
+}
 
-const PACKAGE_ROOT = resolve(__dirname, "..", "..");
+let _circuitPaths: CircuitPaths | undefined;
 
-const CONFIDENTIAL_TRANSFER_WASM = resolve(
-  PACKAGE_ROOT,
-  "circuits/v0.3/confidential_transfer.wasm"
-);
-const CONFIDENTIAL_TRANSFER_ZKEY = resolve(
-  PACKAGE_ROOT,
-  "circuits/v0.3/confidential_transfer_final.zkey"
-);
+async function getCircuitPaths(): Promise<CircuitPaths> {
+  if (typeof window !== "undefined") {
+    throw new Error(
+      "buildShieldedTransferProof requires Node.js runtime (wasm/zkey file I/O). " +
+        "Call it from an API route or server action, not directly from a client component."
+    );
+  }
+  if (_circuitPaths) return _circuitPaths;
+  const { fileURLToPath } = await import("url");
+  const { dirname, resolve } = await import("path");
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const PACKAGE_ROOT = resolve(__dirname, "..", "..");
+  _circuitPaths = {
+    wasm: resolve(PACKAGE_ROOT, "circuits/v0.5.1/confidential_transfer.wasm"),
+    zkey: resolve(PACKAGE_ROOT, "circuits/v0.5.1/confidential_transfer_final.zkey"),
+  };
+  return _circuitPaths;
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -114,13 +130,18 @@ export async function buildShieldedTransferProof(
   input: ShieldedTransferProofInput,
   options?: ProofArtifactOptions
 ): Promise<ShieldedTransferProofResult> {
-  const wasmPath = options?.wasmPath ?? CONFIDENTIAL_TRANSFER_WASM;
-  const zkeyPath = options?.zkeyPath ?? CONFIDENTIAL_TRANSFER_ZKEY;
+  let wasmPath = options?.wasmPath;
+  let zkeyPath = options?.zkeyPath;
+  if (!wasmPath || !zkeyPath) {
+    const paths = await getCircuitPaths();
+    wasmPath = wasmPath ?? paths.wasm;
+    zkeyPath = zkeyPath ?? paths.zkey;
+  }
 
   // Input range guards (loud failure beats silent witness rejection)
-  if (input.oldBalance < 0n || input.oldBalance >= 1n << 64n) {
+  if (input.oldBalance < 0n || input.oldBalance >= 1n << 128n) {
     throw new RangeError(
-      `buildShieldedTransferProof: oldBalance must be in [0, 2^64), got ${input.oldBalance}`
+      `buildShieldedTransferProof: oldBalance must be in [0, 2^128), got ${input.oldBalance}`
     );
   }
   if (input.transferAmount < 0n || input.transferAmount > input.oldBalance) {

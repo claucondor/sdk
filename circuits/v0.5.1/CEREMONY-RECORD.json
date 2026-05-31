@@ -1,0 +1,69 @@
+{
+  "ceremony": "openjanus-v0.5.1-pot18",
+  "date": "2026-05-29T21:20:00Z",
+  "ptau": {
+    "filename": "powersOfTau28_hez_final_18.ptau",
+    "source": "https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_18.ptau",
+    "canonical_source": "https://github.com/iden3/snarkjs (README checksums table)",
+    "size_bytes": 302072984,
+    "blake2b": "7e6a9c2e5f05179ddfc923f38f917c9e6831d16922a902b0b4758b8e79c2ab8a81bb5f29952e16ee6c5067ed044d7857b5de120a90704c1d3b637fd94b95b13e",
+    "sha256": "e970efa7774da80101e0ac336d083ef3339855c98112539338d706b2b89ac694",
+    "note": "Blake2b matches snarkjs README canonical hash; this is the standard hash format used by Hermez/iden3 for ptau file integrity"
+  },
+  "circuits": {
+    "amount_disclose": {
+      "non_linear_constraints": 3380,
+      "linear_constraints": 134,
+      "public_inputs": 3,
+      "private_inputs": 1,
+      "wires": 3515,
+      "template_instances": 12,
+      "pot18_headroom": "2^18=262144 >> 3380 constraints (plenty of headroom)"
+    },
+    "confidential_transfer": {
+      "non_linear_constraints": 10269,
+      "linear_constraints": 407,
+      "public_inputs": 6,
+      "private_inputs": 5,
+      "wires": 10674,
+      "template_instances": 15,
+      "pot18_headroom": "2^18=262144 >> 10269 constraints (plenty of headroom)"
+    }
+  },
+  "phase2": {
+    "contributors": [
+      {
+        "index": 1,
+        "name": "openjanus-v0.5.1-pot18-contributor-1",
+        "entropy": "openssl rand -hex 32 (not logged per protocol)",
+        "amount_disclose_contribution_hash": "98ef4a72 3673c240 acb53c36 6deb969d f079377d e8ca9a66 fcd2ce9c 32b5133b 538fefa4 910a5ce7 b847dab0 0f44daca 632c43b8 5ee5d5bd 9822e39f d55c5161",
+        "confidential_transfer_contribution_hash": "58bed05f 8d944b69 b356a0c8 8f2c53b1 d255efff a1cb9b42 9376d757 f6df441b e566687d 0ca3a872 287663ad 86137c49 5b201ff7 e5c3bc97 95b6fc2f a574c064"
+      }
+    ],
+    "beacon": {
+      "type": "Flow VRF (testnet block ID)",
+      "block_height": 324226714,
+      "block_id_hex": "6e470bc1fc410b1a12b72991da0a8b4d7cfc5c8872eff0a3d57ae0c8ecffdc7a",
+      "iterations_exp": 10,
+      "amount_disclose_beacon_hash": "12b5a780 27b18454 74500fd4 549653c9 8e955bcd f85dbcbf 88e6e077 e69cf0ec 96d5bb79 d16e881d 6b5638fb 6d7a481f 4fcc5587 6c1fe1a0 75608e36 7665a26d",
+      "confidential_transfer_beacon_hash": "1388847a b4d73739 1d65cf12 f3cafaa1 ef0d3683 cd7d8e98 f1607f35 c51df4c9 d0d6cfad c3effd8f 296eca96 3cae357a 0578c514 cf8a725f dae557c6 ac649ade"
+    },
+    "zkey_verify": {
+      "amount_disclose": "ZKey Ok!",
+      "confidential_transfer": "ZKey Ok!"
+    }
+  },
+  "outputs": {
+    "amount_disclose_final_zkey": "amount_disclose_final.zkey",
+    "amount_disclose_vkey": "amount_disclose_vkey.json",
+    "amount_disclose_verifier_sol": "AmountDiscloseVerifier.sol",
+    "confidential_transfer_final_zkey": "confidential_transfer_final.zkey",
+    "confidential_transfer_vkey": "confidential_transfer_vkey.json",
+    "confidential_transfer_verifier_sol": "ConfidentialTransferVerifier.sol"
+  },
+  "previous_verifiers": {
+    "amount_disclose": "0xee5Dc464e7e9782c7b04FC0bEAd0EBC2F366945b",
+    "confidential_transfer": "0x93cb6f84B30455CCF2154C671F96201333756D9e",
+    "pot": "pot14"
+  }
+}

@@ -66,7 +66,7 @@ async function getBabyJub() {
 /**
  * Compute a Pedersen commitment C = Pedersen(value, blinding) on BabyJubJub.
  *
- * Packing format (circomlib Pedersen(192) template):
+ * v0.3 packing format (circomlib Pedersen(192) template — 24-byte buffer):
  *   bytes [0..7]   — value as 64-bit little-endian
  *   bytes [8..23]  — blinding as 128-bit little-endian
  *
@@ -74,9 +74,11 @@ async function getBabyJub() {
  *   - value must be in [0, 2^64)
  *   - blinding must be in [0, 2^128)
  *
- * @param value    Token amount to commit to
+ * @param value    Token amount to commit to (max 2^64-1 for v0.3 circuits)
  * @param blinding 128-bit blinding factor (must be randomly generated; store it!)
  * @returns        BabyJubJub point (x, y) as bigints
+ *
+ * @deprecated Use computeCommitmentV05 for v0.5+ circuits (supports 2^128 values).
  */
 export async function computeCommitment(
   value: bigint,
@@ -105,6 +107,66 @@ export async function computeCommitment(
 
   let b = blinding;
   for (let i = 8; i < 24; i++) {
+    buf[i] = Number(b & 0xffn);
+    b >>= 8n;
+  }
+
+  const hash = pedersenHash.hash(buf);
+  const point = babyJub.unpackPoint(hash);
+
+  return {
+    x: F.toObject(point[0]) as bigint,
+    y: F.toObject(point[1]) as bigint,
+  };
+}
+
+/**
+ * Compute a v0.5 Pedersen commitment C = Pedersen(value, blinding) on BabyJubJub.
+ *
+ * v0.5 packing format (circomlib Pedersen(256) template — 32-byte buffer):
+ *   bytes [0..15]  — value as 128-bit little-endian
+ *   bytes [16..31] — blinding as 128-bit little-endian
+ *
+ * This matches the circuit packing in amount_disclose.circom v0.5 and
+ * confidential_transfer.circom v0.5 (both use Pedersen(256) with 128-bit value
+ * concatenated with 128-bit blinding).
+ *
+ * Constraints:
+ *   - value must be in [0, 2^128)
+ *   - blinding must be in [0, 2^128)
+ *
+ * @param value    Token amount to commit to (up to 2^128-1)
+ * @param blinding 128-bit blinding factor (must be randomly generated; store it!)
+ * @returns        BabyJubJub point (x, y) as bigints
+ */
+export async function computeCommitmentV05(
+  value: bigint,
+  blinding: bigint
+): Promise<CommitmentXY> {
+  if (value < 0n || value >= (1n << 128n)) {
+    throw new RangeError(`computeCommitmentV05: value must be in [0, 2^128), got ${value}`);
+  }
+  if (blinding < 0n || blinding >= (1n << 128n)) {
+    throw new RangeError(
+      `computeCommitmentV05: blinding must be in [0, 2^128), got ${blinding}`
+    );
+  }
+
+  const pedersenHash = await getPedersenHash();
+  const babyJub = await getBabyJub();
+  const F = babyJub.F;
+
+  // 32-byte buffer: 16 bytes value (LE) + 16 bytes blinding (LE)
+  const buf = Buffer.alloc(32, 0);
+
+  let v = value;
+  for (let i = 0; i < 16; i++) {
+    buf[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+
+  let b = blinding;
+  for (let i = 16; i < 32; i++) {
     buf[i] = Number(b & 0xffn);
     b >>= 8n;
   }

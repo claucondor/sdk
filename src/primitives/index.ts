@@ -33,6 +33,7 @@ export {
   BABYJUB_EVM_ADDRESS,
   FLOW_TESTNET_ACCESS_NODE,
   computeCommitment,
+  computeCommitmentV05,
   addCommitmentsLocal,
   subCommitmentsLocal,
   negateCommitment,
