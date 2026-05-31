@@ -1,6 +1,6 @@
 # @openjanus/sdk
 
-Privacy primitives for the Flow blockchain.
+Privacy primitives for the Flow blockchain. Current release: **v0.5.4**.
 
 Send FLOW without revealing the amount. Run a private payroll. Accept donations
 with hidden values. All using your existing Flow wallet — no new tools required.
@@ -9,6 +9,10 @@ OpenJanus is **Cadence-first**: privacy lives in Cadence-native flows that
 settle through Flow EVM. The EVM is the implementation detail, not the product
 surface. Think of it as a doorway: you stand on the Cadence side, and the ZK
 machinery lives quietly beneath the threshold.
+
+> **Privacy, not anonymity.** Sender and recipient addresses stay public on-chain.
+> Only the transferred amount is hidden. OFAC sanctions screening is planned for
+> mainnet (Chainalysis Oracle hook on wrap).
 
 ---
 
@@ -88,20 +92,40 @@ await flow.unwrap({
 
 For the visual explanation of the underlying primitives, see [PrivateTip /learn](https://github.com/openjanus/private-tip).
 
+> **Fee model**: wrap and unwrap each carry a **0.1% boundary fee** (10 bps, hard
+> cap 100 bps). Shielded transfers between accounts are **free** — no fee is taken
+> on in-pool transfers. Fee recipient is the admin COA; the fee is deducted from
+> the gross amount before crediting the shielded slot.
+
 ---
 
 ## Privacy properties
 
 | Channel | wrap | shieldedTransfer | unwrap |
 |---|---|---|---|
-| msg.value | LEAK (boundary in) | HIDE | LEAK (boundary out) |
-| calldata | LEAK at wrap | HIDE | LEAK at unwrap |
-| events | `Wrapped(amount)` | `ConfidentialTransfer` (no amount) | `Unwrapped(amount, recipient)` |
+| msg.value | LEAK (gross amount, boundary in) | HIDE (always 0) | N/A — function is non-payable |
+| calldata | LEAK (netAmount as proof public input) | HIDE (only commitments + proofs) | LEAK (claimedAmount + recipient as proof public inputs) |
+| events | `Wrapped(sender, netAmount)` + `WrapWithSnapshot(sender, netAmount, encryptedBlob)` | `ConfidentialTransfer(from, to)` (no amount) + `ShieldedTransferWithSnapshot(from, to, encryptedBlob)` | `Unwrapped(sender, recipient, netToRecipient)` + `UnwrapWithSnapshot(sender, claimedAmount, encryptedBlob)` |
 | storage | commitment opaque (Pedersen) | commitment opaque | commitment opaque |
 | commitment | 128-bit Pedersen blinding | 128-bit Pedersen blinding | 128-bit Pedersen blinding |
 
+> **Wrap note**: `msg.value` is the gross amount; the fee is deducted before the
+> proof is verified. `Wrapped` and `WrapWithSnapshot` both emit the **net**
+> amount (post-fee). The fee is inferrable since `feeBps` is public.
+
+> **Unwrap note**: `unwrap` is non-payable — `msg.value` is always 0 at unwrap.
+> The recipient receives the net via an internal FLOW transfer, which is visible
+> as an internal transaction on the explorer regardless of what events are emitted.
+
 Aggregate `totalLocked` is **always public** — external observers can audit the
 pool size at any time. This is intentional boundary accounting.
+
+**Amount privacy on shielded transfers, transparency at boundaries — by design,
+not by accident.** Unwrap amounts are inherently public: the native FLOW transfer
+to the recipient is an internal transaction visible on any block explorer.
+Removing events would not make unwraps private — calldata, the internal value
+transfer, the `totalLocked` storage delta, and the contract balance delta all
+independently leak the amount. This is a property of EVM, not of this contract.
 
 ---
 
