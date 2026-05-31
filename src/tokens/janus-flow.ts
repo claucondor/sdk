@@ -11,7 +11,7 @@
  *   unwrap          : claimedAmount + recipient VISIBLE           (boundary out)
  *   shieldedTransfer: amount HIDDEN on calldata/events/storage    (full shielded)
  *
- * Fee model (v0.5.4-fees):
+ * Fee model (v0.5.5-fees):
  *   - 0.1% fee (10 bps) on BOUNDARIES ONLY: wrap + unwrap.
  *   - shieldedTransfer: NO FEE — amounts are hidden, fee computation would
  *     break privacy.
@@ -28,9 +28,9 @@
  * Helper: `computeNetWrap(grossWei, feeBps)` — pure, no provider needed.
  * Helper: `computeNetUnwrap(claimedWei, feeBps)` — what the recipient gets.
  *
- * v0.5 production deployment (Flow EVM testnet):
+ * v0.5.5-fees production deployment (Flow EVM testnet):
  *   JanusFlow proxy:               0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078  (UNCHANGED)
- *   JanusFlow impl:                0xa2607E9EAb1718a2fAf5a1328A7d3a9Aa854efff  (v0.5)
+ *   JanusFlow impl:                0x0d54cf5560548A267EB31b4a90858c9b37e0C740  (v0.5.5-fees — adds adminResetSlot)
  *   AmountDiscloseVerifier:        0xee5Dc464e7e9782c7b04FC0bEAd0EBC2F366945b  (v0.5 ceremony)
  *   ConfidentialTransferVerifier:  0x93cb6f84B30455CCF2154C671F96201333756D9e  (v0.5 ceremony)
  *   BabyJub (re-used):             0x27139AFda7425f51F68D32e0A38b7D43BcB0f870  (UNCHANGED)
@@ -60,10 +60,11 @@ import {
 /** v0.3 JanusFlow ERC1967 proxy on Flow EVM testnet. */
 export const JANUS_FLOW_EVM_ADDRESS = "0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078";
 
-/** v0.5.4-fees JanusFlow implementation contract on Flow EVM testnet.
- *  Deployed 2026-05-30. Prior v0.5.3 impl: 0xd6584cb2788D2eA5c3AB61fb72aa9fEaC27ae79D
+/** v0.5.5-fees JanusFlow implementation contract on Flow EVM testnet.
+ *  Deployed 2026-05-31. Adds adminResetSlot(address) for slot recovery.
+ *  Prior v0.5.4-fees impl: 0x4F0914911C2f2beb7bFf6d060F3136bbd8c57943
  */
-export const JANUS_FLOW_EVM_IMPL_ADDRESS = "0x4F0914911C2f2beb7bFf6d060F3136bbd8c57943";
+export const JANUS_FLOW_EVM_IMPL_ADDRESS = "0x0d54cf5560548A267EB31b4a90858c9b37e0C740";
 
 /** v0.3 Cadence router address (cross-VM wrapper around the EVM proxy — unchanged). */
 export const JANUS_FLOW_CADENCE_ADDRESS = "0x5dcbeb41055ec57e";
@@ -72,7 +73,7 @@ export const JANUS_FLOW_CADENCE_ADDRESS = "0x5dcbeb41055ec57e";
 export const JANUS_FLOW_CONTRACT_NAME = "JanusFlow";
 
 /** SDK version identifier. Tracks the SDK version (on-chain Cadence router still reports v0.3.0). */
-export const JANUS_FLOW_VERSION = "0.5.4-fees";
+export const JANUS_FLOW_VERSION = "0.5.5-fees";
 
 /**
  * Per-call wrap cap. v0.5: 2^128-1 attoFLOW (effectively unbounded — matches the
@@ -117,7 +118,7 @@ export const JANUS_FLOW_CADENCE_ADDRESS_LEGACY = "0x28fef3d1d6a12800";
 // ---------------------------------------------------------------------------
 
 /**
- * ABI fragments for JanusFlow v0.5.4-fees concrete signatures.
+ * ABI fragments for JanusFlow v0.5.5-fees concrete signatures.
  *
  * v0.5.4-fees additions (over v0.5.3):
  *   - feeRecipient()    : view — returns current fee recipient address
@@ -126,6 +127,9 @@ export const JANUS_FLOW_CADENCE_ADDRESS_LEGACY = "0x28fef3d1d6a12800";
  *   - initFees(address, uint16) : one-time post-upgrade fee initializer (owner only)
  *   - setFeeRecipient(address)  : owner-only fee recipient setter
  *   - setFeeBps(uint16)         : owner-only fee rate setter (capped at MAX_FEE_BPS)
+ *
+ * v0.5.5-fees additions (over v0.5.4-fees):
+ *   - adminResetSlot(address user) : onlyOwner — resets user's commitment to identity + zeros firstSnapshotBlock
  */
 export const JANUS_FLOW_EXTRA_ABI = [
   "function MAX_WRAP() view returns (uint256)",
@@ -145,7 +149,7 @@ export const JANUS_FLOW_EXTRA_ABI = [
 // ---------------------------------------------------------------------------
 // Fee helpers — pure math (no provider required) + on-chain reads
 //
-// Fee model (v0.5.4-fees):
+// Fee model (v0.5.5-fees):
 //   - Wrap: user sends `grossAmount` as msg.value. netAmount = gross * (10000 - feeBps) / 10000.
 //     The ZK proof MUST bind to netAmount. Pass netAmount to buildAmountDiscloseProof().
 //   - Unwrap: user specifies `claimedAmount` (full debit). Recipient gets
@@ -487,7 +491,7 @@ export class JanusFlow extends JanusToken {
   }
 
   /**
-   * Read the current fee rate from the proxy (v0.5.4-fees).
+   * Read the current fee rate from the proxy (v0.5.5-fees).
    * Returns basis points: 10 = 0.1%, 0 = no fee.
    * Use `computeNetWrap(gross, feeBps)` and `computeNetUnwrap(claimed, feeBps)`
    * to compute what the user actually deposits / receives.
@@ -498,7 +502,7 @@ export class JanusFlow extends JanusToken {
   }
 
   /**
-   * Read the current fee recipient address from the proxy (v0.5.4-fees).
+   * Read the current fee recipient address from the proxy (v0.5.5-fees).
    */
   async feeRecipient(): Promise<string> {
     const addr = await this._contract().feeRecipient();
@@ -512,7 +516,7 @@ export class JanusFlow extends JanusToken {
   /**
    * Wrap `amountWei` of native FLOW into the caller's shielded slot.
    *
-   * v0.5.4-fees: A protocol fee of `feeBps / 10000` is deducted from
+   * v0.5.5-fees: A protocol fee of `feeBps / 10000` is deducted from
    * `amountWei` before the proof is verified. The contract binds the
    * Pedersen commitment to `netAmount = amountWei * (10000 - feeBps) / 10000`.
    *
@@ -648,7 +652,7 @@ export class JanusFlow extends JanusToken {
    * residual commitment stays hidden — only the claimed amount + recipient
    * are leaked at the boundary.
    *
-   * v0.5.4-fees: A protocol fee of `feeBps / 10000` is deducted from
+   * v0.5.5-fees: A protocol fee of `feeBps / 10000` is deducted from
    * `claimedAmountWei`. The ZK proof binds to the FULL `claimedAmountWei`
    * (the amount spent from the commitment). The recipient receives:
    *   netToRecipient = claimedAmountWei * (10000 - feeBps) / 10000
