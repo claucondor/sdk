@@ -9,6 +9,10 @@ export default defineConfig({
     "utils/index": "src/utils/index.ts",
     "tokens/index": "src/tokens/index.ts",
     "recovery/index": "src/recovery/index.ts",
+    // v0.6 new modules
+    "adapters/index": "src/adapters/index.ts",
+    "orchestration/index": "src/orchestration/index.ts",
+    "scan/index": "src/scan/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,
