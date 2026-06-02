@@ -150,12 +150,16 @@ transaction(
 }
 
 function buildPublishMemoKeyTx(contractAddr: string): string {
+  // Mirrors cadence-crypto-lab setup_memo_key_mockft.cdc. JanusMockFT delegates
+  // to the shared JanusFlow.MemoKey resource at /storage/openjanusMemoKey, so
+  // publishing once via this tx makes the pubkey readable from all Janus apps.
   return `
 import JanusMockFT from ${contractAddr}
+import JanusFlow from 0x5dcbeb41055ec57e
 
 transaction(pubkeyX: UInt256, pubkeyY: UInt256) {
-  prepare(signer: auth(BorrowValue) &Account) {
-    JanusMockFT.publishMemoKey(signer: signer, pubkeyX: pubkeyX, pubkeyY: pubkeyY)
+  prepare(signer: auth(SaveValue, LoadValue, IssueStorageCapabilityController, PublishCapability, UnpublishCapability) &Account) {
+    JanusMockFT.publishMemoKey(account: signer, pubkeyX: pubkeyX, pubkeyY: pubkeyY)
   }
 }
 `;
@@ -240,13 +244,20 @@ access(all) fun main(addr: Address): {String: UInt256} {
     return { x: BigInt(result.x), y: BigInt(result.y) };
   }
 
+  /**
+   * Read the user's MemoKey from the shared JanusFlow MemoKey resource at
+   * 0x5dcbeb41055ec57e. JanusMockFT (and all v0.6 Cadence Janus tokens) use
+   * a SHARED memokey registry — publishing on JanusFlow.MemoKey makes the
+   * pubkey readable from any Janus Cadence app via JanusFlow.getMemoPubkey(owner).
+   * Returns null if no MemoKey resource is published at /public/openjanusMemoKey.
+   */
   async getMemoKey(addr: string): Promise<{ x: bigint; y: bigint } | null> {
     const fcl = await this._fcl();
     const script = `
-import ${this.entry.contractName} from ${this.entry.cadenceAddress}
+import JanusFlow from 0x5dcbeb41055ec57e
 
-access(all) fun main(addr: Address): {String: UInt256} {
-  return ${this.entry.contractName}.getMemoKeyPub(account: addr)
+access(all) fun main(addr: Address): {String: UInt256}? {
+  return JanusFlow.getMemoPubkey(owner: addr)
 }
 `;
     try {
@@ -256,6 +267,7 @@ access(all) fun main(addr: Address): {String: UInt256} {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         args: (arg: any, types: any) => [arg(addr, types.Address)],
       });
+      if (result === null || result === undefined) return null;
       const x = BigInt(result.x ?? 0);
       const y = BigInt(result.y ?? 0);
       if (x === 0n && y === 0n) return null;

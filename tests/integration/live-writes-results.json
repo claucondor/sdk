@@ -1,0 +1,87 @@
+{
+  "startedAt": "2026-06-02T15:06:32.976Z",
+  "tests": [
+    {
+      "name": "scan Alice's WrapWithSnapshot from lab",
+      "status": "PASS",
+      "evidence": "decoded wrap @ block 324750893, cipher=32B"
+    },
+    {
+      "name": "scan Alice's ShieldedTransferWithSnapshot (sender) from lab",
+      "status": "PASS",
+      "evidence": "decoded 1 transfer event(s) for Alice as sender"
+    },
+    {
+      "name": "scan Bob's incoming note (recipient) from lab",
+      "status": "PASS",
+      "evidence": "Bob received 1 note(s), cipher=32B"
+    },
+    {
+      "name": "scan Bob's UnwrapWithSnapshot from lab",
+      "status": "PASS",
+      "evidence": "decoded Bob's unwrap @ block 324751311"
+    },
+    {
+      "name": "scan Charlie→Dave transfer chain from lab",
+      "status": "PASS",
+      "evidence": "Dave received note @ block 324751674"
+    },
+    {
+      "name": "scanner filters correctly: Alice's wrap NOT seen as Bob's",
+      "status": "PASS",
+      "evidence": "0 events for Bob in Alice's wrap block (correct)"
+    },
+    {
+      "name": "orchestrateWrap produces valid txCommit + amountProof + snapshot",
+      "status": "PASS",
+      "evidence": "net=999000000000000000, fee=1000000000000000, proof[0..1]=113517842584..."
+    },
+    {
+      "name": "orchestrateShieldedTransfer produces TWO ephemerals (forward secrecy)",
+      "status": "PASS",
+      "evidence": "eph_snap.x=741102337073..., eph_note.x=801424581874..., different=true"
+    },
+    {
+      "name": "flow adapter calldata for publishMemoKey decodes correctly",
+      "status": "PASS",
+      "evidence": "selector=0x6370796a, decoded=(123, 456)"
+    },
+    {
+      "name": "9-param shieldedTransfer ABI selector is canonical uint256[N]",
+      "status": "PASS",
+      "evidence": "sig=shieldedTransfer(address,uint256[6],uint256[8],bytes,uint256,uint256,bytes,uint2..., selector=0x6218f5d9"
+    },
+    {
+      "name": "EVM static-call: feeBps() on all 3 EVM tokens",
+      "status": "PASS",
+      "evidence": "{\"flow\":10,\"wflow\":10,\"mockusdc\":10}"
+    },
+    {
+      "name": "EVM static-call: balanceOfCommitmentXY for Alice on all 3 tokens",
+      "status": "PASS",
+      "evidence": "{\"flow\":{\"x\":\"14464377103083611242...\",\"y\":\"14181080884418193951...\"},\"wflow\":{\"x\":\"19375235618089961422...\",\"y\":\"18402509729113513337...\"},\"mockusdc\":{\"x\":\"18819136772008235872...\",\"y\":\"1555707020065"
+    }
+  ],
+  "finishedAt": "2026-06-02T15:06:57.040Z",
+  "summary": {
+    "passed": 12,
+    "failed": 0,
+    "total": 12
+  },
+  "labTxs": {
+    "alice_wrap": "28938a6a6b0b414931a1d64793a8db6e9577983f18b0724156bef86ac6e3a36a",
+    "alice_to_bob_shielded_transfer": "be7e844da729aad71f915942e73cd836f59c999a7f19b760f731b1e76fabca39",
+    "bob_unwrap": "2da25ee81d094cdfd8a9b6efe3907c28c3f0b6ffc02b14b50b4079b3ce3450a2",
+    "charlie_wrap": "e6f1ab4d1754da75ad687ae3ed5edb38e2af62dfc3c7e160a7a17ec0d3bfbb25",
+    "charlie_to_dave_shielded_transfer": "a43b147c2833e75a820114b542443d34bd8c690c21fd4195e9a84b9d9d0773c9",
+    "dave_unwrap": "549953dd51fa270bd0d54645fdac37258284495e1f06919df605caa00a792333"
+  },
+  "labBlocks": {
+    "alice_wrap": 324750893,
+    "alice_to_bob_shielded_transfer": 324751052,
+    "bob_unwrap": 324751311,
+    "charlie_wrap": 324751552,
+    "charlie_to_dave_shielded_transfer": 324751674,
+    "dave_unwrap": 324751744
+  }
+}

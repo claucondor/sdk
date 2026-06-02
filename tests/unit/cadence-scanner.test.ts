@@ -141,15 +141,17 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
     expect(events).toHaveLength(0);
   });
 
-  it("scanCadenceIncomingNotes picks up ShieldedTransferWithSnapshot where user is recipient", async () => {
+  it("scanCadenceIncomingNotes returns all ShieldedTransferWithSnapshot events (no addr filter — privacy by design)", async () => {
     const transferPayload = buildEventPayload(
       `A.7599043aea001283.JanusMockFT.ShieldedTransferWithSnapshot`,
       [
-        { name: "sender", value: { type: "Address", value: ALICE } },
-        { name: "recipient", value: { type: "Address", value: BOB } },
-        { name: "encryptedSnapshot", value: buildBytes([7, 7, 7]) },
-        { name: "ephPubX", value: { type: "UInt256", value: "100" } },
-        { name: "ephPubY", value: { type: "UInt256", value: "200" } },
+        { name: "fromCommitX", value: { type: "UInt256", value: "11" } },
+        { name: "fromCommitY", value: { type: "UInt256", value: "22" } },
+        { name: "toCommitX", value: { type: "UInt256", value: "33" } },
+        { name: "toCommitY", value: { type: "UInt256", value: "44" } },
+        { name: "encryptedSnapshotFrom", value: buildBytes([7, 7, 7]) },
+        { name: "ephPubFromX", value: { type: "UInt256", value: "100" } },
+        { name: "ephPubFromY", value: { type: "UInt256", value: "200" } },
         { name: "encryptedNoteTo", value: buildBytes([42, 43, 44]) },
         { name: "ephPubToX", value: { type: "UInt256", value: "777" } },
         { name: "ephPubToY", value: { type: "UInt256", value: "888" } },
@@ -193,16 +195,19 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
     expect(notes[0]!.ephPubkey.y).toBe(888n);
   });
 
-  it("scanCadenceIncomingNotes filters out notes where recipient is someone else", async () => {
+  it("scanCadenceIncomingNotes returns transfer events even when caller is unrelated (decryption filters downstream)", async () => {
     const charlie = "0x3c601a443c81e6cd";
+    void charlie;
     const transferToCharlie = buildEventPayload(
       `A.7599043aea001283.JanusMockFT.ShieldedTransferWithSnapshot`,
       [
-        { name: "sender", value: { type: "Address", value: ALICE } },
-        { name: "recipient", value: { type: "Address", value: charlie } },
-        { name: "encryptedSnapshot", value: buildBytes([1]) },
-        { name: "ephPubX", value: { type: "UInt256", value: "1" } },
-        { name: "ephPubY", value: { type: "UInt256", value: "2" } },
+        { name: "fromCommitX", value: { type: "UInt256", value: "5" } },
+        { name: "fromCommitY", value: { type: "UInt256", value: "6" } },
+        { name: "toCommitX", value: { type: "UInt256", value: "7" } },
+        { name: "toCommitY", value: { type: "UInt256", value: "8" } },
+        { name: "encryptedSnapshotFrom", value: buildBytes([1]) },
+        { name: "ephPubFromX", value: { type: "UInt256", value: "1" } },
+        { name: "ephPubFromY", value: { type: "UInt256", value: "2" } },
         { name: "encryptedNoteTo", value: buildBytes([1, 2]) },
         { name: "ephPubToX", value: { type: "UInt256", value: "3" } },
         { name: "ephPubToY", value: { type: "UInt256", value: "4" } },
@@ -234,11 +239,14 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
       return new Response(JSON.stringify([]), { status: 200 });
     }) as unknown as typeof fetch;
 
+    // Bob scans — returns all transfer events in window (1), since events have
+    // no recipient address. Bob's downstream decrypt will fail for this blob.
     const notes = await scanCadenceIncomingNotes(BOB, CONTRACT_ADDR, CONTRACT_NAME, {
       fromBlock: 299_960,
       toBlock: 300_000,
     });
-    expect(notes).toHaveLength(0);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.txHash).toBe("tx-to-charlie");
   });
 
   it("returns events sorted by blockHeight ascending", async () => {

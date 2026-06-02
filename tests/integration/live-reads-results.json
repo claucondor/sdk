@@ -1,0 +1,161 @@
+{
+  "startedAt": "2026-06-02T15:07:06.587Z",
+  "tests": [
+    {
+      "name": "flow: feeBps in [0,100]",
+      "status": "PASS",
+      "evidence": "feeBps=10"
+    },
+    {
+      "name": "flow: feeRecipient is 0x address",
+      "status": "PASS",
+      "evidence": "0x000000000000000000000002b7557Ee5D4A32d06"
+    },
+    {
+      "name": "flow: getCommitment(zero) doesn't throw",
+      "status": "PASS",
+      "evidence": "(0, 1)"
+    },
+    {
+      "name": "flow: getMemoKey(zero) returns null",
+      "status": "PASS",
+      "evidence": "null"
+    },
+    {
+      "name": "flow: getFirstSnapshotBlock(zero) returns 0",
+      "status": "PASS",
+      "evidence": "0n"
+    },
+    {
+      "name": "flow: computeNet(1e18) returns net <= 1e18",
+      "status": "PASS",
+      "evidence": "net=999000000000000000"
+    },
+    {
+      "name": "flow: getCommitment(alice COA) works",
+      "status": "PASS",
+      "evidence": "(x=14464377103083611242..., y=14181080884418193951...)"
+    },
+    {
+      "name": "flow: getMemoKey(alice COA) returns null or valid {x,y}",
+      "status": "PASS",
+      "evidence": "(x=10256193356452821037..., y=21806945034125235971...)"
+    },
+    {
+      "name": "wflow: feeBps in [0,100]",
+      "status": "PASS",
+      "evidence": "feeBps=10"
+    },
+    {
+      "name": "wflow: feeRecipient is 0x address",
+      "status": "PASS",
+      "evidence": "0x000000000000000000000002b7557Ee5D4A32d06"
+    },
+    {
+      "name": "wflow: getCommitment(zero) doesn't throw",
+      "status": "PASS",
+      "evidence": "(0, 1)"
+    },
+    {
+      "name": "wflow: getMemoKey(zero) returns null",
+      "status": "PASS",
+      "evidence": "null"
+    },
+    {
+      "name": "wflow: getFirstSnapshotBlock(zero) returns 0",
+      "status": "PASS",
+      "evidence": "0n"
+    },
+    {
+      "name": "wflow: computeNet(1e18) returns net <= 1e18",
+      "status": "PASS",
+      "evidence": "net=999000000000000000"
+    },
+    {
+      "name": "wflow: getCommitment(alice COA) works",
+      "status": "PASS",
+      "evidence": "(x=19375235618089961422..., y=18402509729113513337...)"
+    },
+    {
+      "name": "wflow: getMemoKey(alice COA) returns null or valid {x,y}",
+      "status": "PASS",
+      "evidence": "(x=59760167380015113512..., y=13972584454418485303...)"
+    },
+    {
+      "name": "mockusdc: feeBps in [0,100]",
+      "status": "PASS",
+      "evidence": "feeBps=10"
+    },
+    {
+      "name": "mockusdc: feeRecipient is 0x address",
+      "status": "PASS",
+      "evidence": "0x000000000000000000000002b7557Ee5D4A32d06"
+    },
+    {
+      "name": "mockusdc: getCommitment(zero) doesn't throw",
+      "status": "PASS",
+      "evidence": "(0, 1)"
+    },
+    {
+      "name": "mockusdc: getMemoKey(zero) returns null",
+      "status": "PASS",
+      "evidence": "null"
+    },
+    {
+      "name": "mockusdc: getFirstSnapshotBlock(zero) returns 0",
+      "status": "PASS",
+      "evidence": "0n"
+    },
+    {
+      "name": "mockusdc: computeNet(1e18) returns net <= 1e18",
+      "status": "PASS",
+      "evidence": "net=999000000000000000"
+    },
+    {
+      "name": "mockusdc: getCommitment(alice COA) works",
+      "status": "PASS",
+      "evidence": "(x=18819136772008235872..., y=15557070200654865236...)"
+    },
+    {
+      "name": "mockusdc: getMemoKey(alice COA) returns null or valid {x,y}",
+      "status": "PASS",
+      "evidence": "(x=59760167380015113512..., y=13972584454418485303...)"
+    },
+    {
+      "name": "mockft: feeBps in [0,100]",
+      "status": "PASS",
+      "evidence": "feeBps=10"
+    },
+    {
+      "name": "mockft: feeRecipient is a Flow address",
+      "status": "PASS",
+      "evidence": "0x7599043aea001283"
+    },
+    {
+      "name": "mockft: getCommitment(alice) doesn't throw",
+      "status": "PASS",
+      "evidence": "(x=17973554177780852872..., y=66739096072732042393...)"
+    },
+    {
+      "name": "mockft: getMemoKey(alice) returns null or valid",
+      "status": "PASS",
+      "evidence": "x=9952034415821957..."
+    },
+    {
+      "name": "getLatestSealedHeight reaches mainnet REST API",
+      "status": "PASS",
+      "evidence": "height=324844518"
+    },
+    {
+      "name": "scanCadenceSnapshots(alice, mockft) over last 200 blocks doesn't throw",
+      "status": "PASS",
+      "evidence": "events_found=0"
+    }
+  ],
+  "finishedAt": "2026-06-02T15:07:43.400Z",
+  "summary": {
+    "passed": 30,
+    "failed": 0,
+    "total": 30
+  }
+}

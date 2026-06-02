@@ -4,14 +4,22 @@
  * Uses Flow REST API to query Cadence events. Flow testnet caps event range
  * at 250 blocks per request, so this paginates aggressively.
  *
- * Events emitted by JanusMockFT (v0.6 contract):
- *   - A.{addr}.JanusMockFT.WrapWithSnapshot(account, grossAmount, netAmount,
+ * Actual event field names emitted by JanusMockFT v0.6 (verified against
+ * deployed contract at 0x7599043aea001283 + live events from the lab E2E run):
+ *
+ *   - WrapWithSnapshot(account: Address, commitX, commitY,
  *       encryptedSnapshot, ephPubX, ephPubY)
- *   - A.{addr}.JanusMockFT.ShieldedTransferWithSnapshot(sender, recipient,
- *       encryptedSnapshot, ephPubX, ephPubY,
- *       encryptedNoteTo, ephPubToX, ephPubToY)
- *   - A.{addr}.JanusMockFT.UnwrapWithSnapshot(account, claimedAmount,
- *       recipient, encryptedSnapshot, ephPubX, ephPubY)
+ *   - ShieldedTransferWithSnapshot(
+ *       fromCommitX/Y, toCommitX/Y,
+ *       encryptedSnapshotFrom, ephPubFromX, ephPubFromY,
+ *       encryptedNoteTo, ephPubToX, ephPubToY
+ *     )
+ *     NOTE: NO sender/recipient ADDRESSES in this event — privacy-by-design.
+ *     The scanner returns ALL transfer events in the time window; the caller
+ *     decrypts every blob and successful decryption identifies the intended
+ *     recipient (only the holder of the matching memo privkey can decrypt).
+ *   - UnwrapWithSnapshot(account: Address, recipient: Address, amount,
+ *       encryptedSnapshot, ephPubX, ephPubY)
  *
  * Event payload encoding: Flow returns events as base64-encoded JSON-CDC.
  * We decode then walk the JSON to extract the encrypted blob + ephemeral pubkey.
@@ -21,7 +29,11 @@ import type { DepositRecord } from "../types";
 import { FLOW_CADENCE_ACCESS } from "../network/contracts";
 
 const FLOW_EVENT_RANGE_MAX = 250; // testnet cap per /v1/events request
-const DEFAULT_LOOKBACK = 250_000; // fallback when firstSnapshotBlock unknown
+// Default lookback when no fromBlock is provided. Flow testnet caps event
+// queries at 250 blocks per request, so a 250k window = ~1000 sequential
+// REST calls (slow). Callers SHOULD pass an explicit fromBlock from
+// app state (e.g. last-scanned block). 5000 = ~20 REST calls = under 30s.
+const DEFAULT_LOOKBACK = 5_000;
 
 interface JsonCDCValue {
   type: string;
@@ -55,20 +67,14 @@ export interface CadenceNoteEvent extends DepositRecord {
 }
 
 // ---------------------------------------------------------------------------
-// JSON-CDC helpers (decode base64-CBOR → extract fields)
+// JSON-CDC helpers (decode base64-JSON → extract fields)
 // ---------------------------------------------------------------------------
 
 function b64DecodeToString(b64: string): string {
   return Buffer.from(b64, "base64").toString("utf8");
 }
 
-/**
- * Walk a Cadence composite/struct event payload and return a map of field
- * name → JSON-CDC value object.
- */
 function eventFieldsByName(payload: JsonCDCValue): Record<string, JsonCDCValue> {
-  // payload looks like: { type: "Event", value: { id: "A.X.JanusMockFT.WrapWithSnapshot",
-  //   fields: [ { name: "account", value: {...} }, ...] } }
   const out: Record<string, JsonCDCValue> = {};
   if (payload?.type !== "Event") return out;
   const inner = payload.value as { fields?: Array<{ name: string; value: JsonCDCValue }> };
@@ -78,17 +84,14 @@ function eventFieldsByName(payload: JsonCDCValue): Record<string, JsonCDCValue> 
   return out;
 }
 
-/** Decode JSON-CDC Address ("0xNNN") to a normalized lowercase hex. */
 function cdcAddress(v: JsonCDCValue): string {
   return String(v.value).toLowerCase();
 }
 
-/** Decode JSON-CDC UInt256/UInt as bigint. */
 function cdcBigInt(v: JsonCDCValue): bigint {
   return BigInt(String(v.value));
 }
 
-/** Decode JSON-CDC [UInt8] array to Uint8Array. */
 function cdcByteArray(v: JsonCDCValue): Uint8Array {
   const arr = v.value as Array<JsonCDCValue>;
   const out = new Uint8Array(arr.length);
@@ -103,17 +106,11 @@ function cdcByteArray(v: JsonCDCValue): Uint8Array {
 // ---------------------------------------------------------------------------
 
 export interface CadenceScannerOpts {
-  /** Flow REST access node URL. Defaults to testnet. */
   accessApi?: string;
-  /** Starting block (inclusive). Defaults to (latest - DEFAULT_LOOKBACK). */
   fromBlock?: number;
-  /** Ending block (inclusive). Defaults to latest sealed. */
   toBlock?: number;
 }
 
-/**
- * Get the latest sealed block height.
- */
 export async function getLatestSealedHeight(accessApi: string = FLOW_CADENCE_ACCESS): Promise<number> {
   const res = await fetch(`${accessApi}/v1/blocks?height=sealed`);
   if (!res.ok) throw new Error(`getLatestSealedHeight: ${res.status} ${res.statusText}`);
@@ -121,10 +118,6 @@ export async function getLatestSealedHeight(accessApi: string = FLOW_CADENCE_ACC
   return Number(data[0]!.header.height);
 }
 
-/**
- * Query events of a given fully-qualified type across a block range.
- * Internally paginates to obey the 250-block range cap.
- */
 async function fetchEvents(
   accessApi: string,
   eventType: string,
@@ -136,10 +129,7 @@ async function fetchEvents(
     const end = Math.min(start + FLOW_EVENT_RANGE_MAX - 1, toBlock);
     const url = `${accessApi}/v1/events?type=${encodeURIComponent(eventType)}&start_height=${start}&end_height=${end}`;
     const res = await fetch(url);
-    if (!res.ok) {
-      // Skip ranges that error (e.g. missing data) — don't crash the whole scan
-      continue;
-    }
+    if (!res.ok) continue;
     const rows = (await res.json()) as CadenceEventResultRow[];
     for (const row of rows) {
       if (row.events && row.events.length > 0) out.push(row);
@@ -151,9 +141,19 @@ async function fetchEvents(
 /**
  * Scan all snapshot-emitting events where `userAddress` is the actor.
  *
- * Returns self-directed snapshot blobs (from WrapWithSnapshot,
- * UnwrapWithSnapshot, and ShieldedTransferWithSnapshot where user==sender),
- * sorted by blockHeight ascending.
+ * Returns self-directed snapshot blobs sorted by blockHeight ascending.
+ *
+ * Filtering rules per event type:
+ *   - WrapWithSnapshot:   filter by `account` field == userAddress
+ *   - UnwrapWithSnapshot: filter by `account` field == userAddress
+ *   - ShieldedTransferWithSnapshot: NO address filter (event carries only
+ *       commits, by privacy design). All events in the range are returned;
+ *       the caller tries decryption on each — only the actor can decrypt
+ *       their own `encryptedSnapshotFrom` blob.
+ *
+ * The encryptedSnapshotFrom + ephPubFromX/Y fields are mapped onto the
+ * CadenceSnapshotEvent {ciphertext, ephPubkey} shape so downstream code
+ * uses a uniform interface regardless of source event.
  */
 export async function scanCadenceSnapshots(
   userAddress: string,
@@ -169,15 +169,11 @@ export async function scanCadenceSnapshots(
     ? userAddress.toLowerCase()
     : `0x${userAddress.toLowerCase()}`;
 
-  const eventTypes = [
-    { type: `A.${addrHex}.${contractName}.WrapWithSnapshot`, kind: "wrap" as const, actorField: "account" },
-    { type: `A.${addrHex}.${contractName}.ShieldedTransferWithSnapshot`, kind: "shieldedTransfer" as const, actorField: "sender" },
-    { type: `A.${addrHex}.${contractName}.UnwrapWithSnapshot`, kind: "unwrap" as const, actorField: "account" },
-  ];
-
   const results: CadenceSnapshotEvent[] = [];
 
-  for (const { type, kind, actorField } of eventTypes) {
+  // WrapWithSnapshot — filter by `account` field
+  {
+    const type = `A.${addrHex}.${contractName}.WrapWithSnapshot`;
     const rows = await fetchEvents(accessApi, type, fromBlock, latest);
     for (const row of rows) {
       const timestampMs = new Date(row.block_timestamp).getTime();
@@ -186,9 +182,7 @@ export async function scanCadenceSnapshots(
         try {
           const payload = JSON.parse(b64DecodeToString(ev.payload)) as JsonCDCValue;
           const fields = eventFieldsByName(payload);
-          if (!fields[actorField]) continue;
-          // Only count events for our user
-          if (cdcAddress(fields[actorField]!) !== normalizedUser) continue;
+          if (!fields.account || cdcAddress(fields.account) !== normalizedUser) continue;
           if (!fields.encryptedSnapshot || !fields.ephPubX || !fields.ephPubY) continue;
           results.push({
             ciphertext: cdcByteArray(fields.encryptedSnapshot),
@@ -196,10 +190,66 @@ export async function scanCadenceSnapshots(
             timestampMs,
             txHash: ev.transaction_id,
             blockHeight,
-            eventType: kind,
+            eventType: "wrap",
           });
         } catch {
-          // skip undecodable
+          /* skip */
+        }
+      }
+    }
+  }
+
+  // UnwrapWithSnapshot — filter by `account`
+  {
+    const type = `A.${addrHex}.${contractName}.UnwrapWithSnapshot`;
+    const rows = await fetchEvents(accessApi, type, fromBlock, latest);
+    for (const row of rows) {
+      const timestampMs = new Date(row.block_timestamp).getTime();
+      const blockHeight = Number(row.block_height);
+      for (const ev of row.events!) {
+        try {
+          const payload = JSON.parse(b64DecodeToString(ev.payload)) as JsonCDCValue;
+          const fields = eventFieldsByName(payload);
+          if (!fields.account || cdcAddress(fields.account) !== normalizedUser) continue;
+          if (!fields.encryptedSnapshot || !fields.ephPubX || !fields.ephPubY) continue;
+          results.push({
+            ciphertext: cdcByteArray(fields.encryptedSnapshot),
+            ephPubkey: { x: cdcBigInt(fields.ephPubX), y: cdcBigInt(fields.ephPubY) },
+            timestampMs,
+            txHash: ev.transaction_id,
+            blockHeight,
+            eventType: "unwrap",
+          });
+        } catch {
+          /* skip */
+        }
+      }
+    }
+  }
+
+  // ShieldedTransferWithSnapshot — NO address filter, return all (caller decrypts)
+  {
+    const type = `A.${addrHex}.${contractName}.ShieldedTransferWithSnapshot`;
+    const rows = await fetchEvents(accessApi, type, fromBlock, latest);
+    for (const row of rows) {
+      const timestampMs = new Date(row.block_timestamp).getTime();
+      const blockHeight = Number(row.block_height);
+      for (const ev of row.events!) {
+        try {
+          const payload = JSON.parse(b64DecodeToString(ev.payload)) as JsonCDCValue;
+          const fields = eventFieldsByName(payload);
+          // map the "From" suffixes to the canonical {ciphertext, ephPubkey} shape
+          if (!fields.encryptedSnapshotFrom || !fields.ephPubFromX || !fields.ephPubFromY) continue;
+          results.push({
+            ciphertext: cdcByteArray(fields.encryptedSnapshotFrom),
+            ephPubkey: { x: cdcBigInt(fields.ephPubFromX), y: cdcBigInt(fields.ephPubFromY) },
+            timestampMs,
+            txHash: ev.transaction_id,
+            blockHeight,
+            eventType: "shieldedTransfer",
+          });
+        } catch {
+          /* skip */
         }
       }
     }
@@ -210,12 +260,20 @@ export async function scanCadenceSnapshots(
 }
 
 /**
- * Scan ShieldedTransferWithSnapshot events where userAddress is the recipient.
- * Returns the note-to-recipient blobs (encryptedNoteTo + its ephemeral),
- * sorted by blockHeight ascending.
+ * Scan ShieldedTransferWithSnapshot events for incoming-note candidates.
+ *
+ * Privacy-design constraint: the event carries NO recipient address — only
+ * the sender's commits and encrypted blobs. So we CANNOT pre-filter by
+ * `recipientAddress`; we return every event in the window. The caller then
+ * tries `decryptNoteTo(blob, ephPub, memoPrivKey)` on each — only the
+ * intended recipient's memo privkey will successfully decrypt the blob.
+ *
+ * The `recipientAddress` arg is kept in the signature for API parity with
+ * the EVM scanner, but it's currently a no-op marker (documented). A future
+ * iteration could use a recipient memokey hint in a contract upgrade.
  */
 export async function scanCadenceIncomingNotes(
-  recipientAddress: string,
+  _recipientAddress: string,
   contractAddress: string,
   contractName: string,
   opts?: CadenceScannerOpts
@@ -224,9 +282,6 @@ export async function scanCadenceIncomingNotes(
   const latest = opts?.toBlock ?? (await getLatestSealedHeight(accessApi));
   const fromBlock = opts?.fromBlock ?? Math.max(1, latest - DEFAULT_LOOKBACK);
   const addrHex = contractAddress.replace(/^0x/, "");
-  const normalizedRecipient = recipientAddress.toLowerCase().startsWith("0x")
-    ? recipientAddress.toLowerCase()
-    : `0x${recipientAddress.toLowerCase()}`;
 
   const eventType = `A.${addrHex}.${contractName}.ShieldedTransferWithSnapshot`;
   const rows = await fetchEvents(accessApi, eventType, fromBlock, latest);
@@ -239,8 +294,6 @@ export async function scanCadenceIncomingNotes(
       try {
         const payload = JSON.parse(b64DecodeToString(ev.payload)) as JsonCDCValue;
         const fields = eventFieldsByName(payload);
-        if (!fields.recipient) continue;
-        if (cdcAddress(fields.recipient!) !== normalizedRecipient) continue;
         if (!fields.encryptedNoteTo || !fields.ephPubToX || !fields.ephPubToY) continue;
         results.push({
           ciphertext: cdcByteArray(fields.encryptedNoteTo),
@@ -250,7 +303,7 @@ export async function scanCadenceIncomingNotes(
           blockHeight,
         });
       } catch {
-        // skip
+        /* skip */
       }
     }
   }
