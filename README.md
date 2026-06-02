@@ -1,6 +1,6 @@
 # @claucondor/sdk
 
-Multi-token privacy SDK for Flow. Version: **v0.6.0**.
+Multi-token privacy SDK for Flow. Version: **v0.6.2**.
 
 Send FLOW, WFLOW, MockUSDC, or MockFT shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
 

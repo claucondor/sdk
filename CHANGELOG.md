@@ -2,6 +2,25 @@
 
 ---
 
+## 0.6.2 — 2026-06-02
+
+Doc-only: README header now correctly reads v0.6.2 (0.6.0 / 0.6.1 had a stale header that said v0.6.0).
+
+## 0.6.1 — 2026-06-02
+
+Cleanup release. No public API changes from 0.6.0.
+
+- Deleted `src/tokens/` (old v0.5 classes) entirely — `src/adapters/` is the only token home now.
+- Deleted `src/recovery/` (superseded by `src/scan/latest-snapshot.ts`).
+- Deleted unused `circuits/v0.5/` and `circuits/v0.5.1/` zkey artifacts (~16 MB).
+- Bundle: 11.4 MB → 3.3 MB packed, 110 → 73 files.
+- Added `src/scan/cadence-scanner.ts` — Flow REST event scanner for JanusMockFT (wrap, shieldedTransfer, unwrap events).
+- `JanusFTAdapter.scanDeposits` + `latestSnapshot` now actually scan + decrypt live Cadence events (no stubs).
+- `JanusFTAdapter.getMemoKey` reads from the shared `JanusFlow.MemoKey` resource at 0x5dcbeb41055ec57e (canonical `/public/openjanusMemoKey` — same key visible from all Janus Cadence apps).
+- Fee math helpers moved to `src/crypto/fee-math.ts`.
+- Switched circuit artifacts to v0.3 (matches deployed verifier addresses).
+- TypeScript-clean. 150/150 unit pass. 42/42 live integration PASS. 5/5 Track F E2E gate PASS.
+
 ## 0.6.0 — 2026-06-01
 
 **First production-ready release. Supersedes all prior versions.**
