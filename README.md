@@ -1,133 +1,8 @@
 # @claucondor/sdk
 
-Privacy primitives for the Flow blockchain. Current release: **v0.5.5**.
+Multi-token privacy SDK for Flow. Version: **v0.6.0**.
 
-Send FLOW without revealing the amount. Run a private payroll. Accept donations
-with hidden values. All using your existing Flow wallet — no new tools required.
-
-The Janus privacy stack is **Cadence-first**: privacy lives in Cadence-native flows that
-settle through Flow EVM. The EVM is the implementation detail, not the product
-surface. Think of it as a doorway: you stand on the Cadence side, and the ZK
-machinery lives quietly beneath the threshold.
-
-> **Privacy, not anonymity.** Sender and recipient addresses stay public on-chain.
-> Only the transferred amount is hidden. OFAC sanctions screening is planned for
-> mainnet (Chainalysis Oracle hook on wrap).
-
----
-
-## Quick start
-
-```bash
-npm install @claucondor/sdk
-```
-
-```typescript
-import {
-  JanusFlow,
-  buildAmountDiscloseProof,
-  buildShieldedTransferProof,
-  generateBlinding,
-  flowToWei,
-} from "@claucondor/sdk";
-import { ethers } from "ethers";
-
-// 1. Connect
-const provider = new ethers.JsonRpcProvider("https://testnet.evm.nodes.onflow.org");
-const wallet   = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
-const flow     = new JanusFlow();
-await flow.connectWithSigner(wallet);
-
-// 2. Wrap 5 FLOW — amount visible at the boundary, hidden everywhere after
-const amountWei = flowToWei(5n);                   // 5 * 10^18
-const blinding  = generateBlinding();               // 128-bit secret — STORE LOCALLY
-const wrapProof = await buildAmountDiscloseProof({ amount: amountWei, blinding });
-
-await flow.wrap({
-  amountWei,
-  txCommit:    wrapProof.txCommit,
-  amountProof: wrapProof.proof,
-});
-
-// 3. Shielded transfer — amount HIDDEN in calldata, events, and storage
-const transferAmount   = flowToWei(2n);
-const transferBlinding = generateBlinding();
-const newBlinding      = generateBlinding();         // store: your new residual blinding
-
-const xferProof = await buildShieldedTransferProof({
-  oldBalance:       amountWei,
-  oldBlinding:      blinding,
-  transferAmount,
-  transferBlinding,
-  newBlinding,
-});
-
-await flow.shieldedTransfer({
-  to:           "0x000000000000000000000000000000000000Babe",
-  publicInputs: xferProof.publicInputs,
-  proof:        xferProof.proof,
-});
-
-// 4. Unwrap — amount + recipient visible at the boundary
-const exitAmount      = flowToWei(3n);               // your residual
-const exitBlinding    = generateBlinding();
-const amountExit      = await buildAmountDiscloseProof({ amount: exitAmount, blinding: newBlinding });
-const transferExit    = await buildShieldedTransferProof({
-  oldBalance:       amountWei - transferAmount,      // local accounting
-  oldBlinding:      newBlinding,
-  transferAmount:   exitAmount,
-  transferBlinding: exitBlinding,
-  newBlinding:      0n,                              // empties the slot
-});
-
-await flow.unwrap({
-  claimedAmountWei:    exitAmount,
-  recipient:           wallet.address,
-  txCommit:            amountExit.txCommit,
-  amountProof:         amountExit.proof,
-  transferPublicInputs: transferExit.publicInputs,
-  transferProof:       transferExit.proof,
-});
-```
-
-For the visual explanation of the underlying primitives, see [PrivateTip /learn](https://github.com/claucondor/private-tip).
-
-> **Fee model**: wrap and unwrap each carry a **0.1% boundary fee** (10 bps, hard
-> cap 100 bps). Shielded transfers between accounts are **free** — no fee is taken
-> on in-pool transfers. Fee recipient is the admin COA; the fee is deducted from
-> the gross amount before crediting the shielded slot.
-
----
-
-## Privacy properties
-
-| Channel | wrap | shieldedTransfer | unwrap |
-|---|---|---|---|
-| msg.value | LEAK (gross amount, boundary in) | HIDE (always 0) | N/A — function is non-payable |
-| calldata | LEAK (netAmount as proof public input) | HIDE (only commitments + proofs) | LEAK (claimedAmount + recipient as proof public inputs) |
-| events | `Wrapped(sender, netAmount)` + `WrapWithSnapshot(sender, netAmount, encryptedBlob)` | `ConfidentialTransfer(from, to)` (no amount) + `ShieldedTransferWithSnapshot(from, to, encryptedBlob)` | `Unwrapped(sender, recipient, netToRecipient)` + `UnwrapWithSnapshot(sender, claimedAmount, encryptedBlob)` |
-| storage | commitment opaque (Pedersen) | commitment opaque | commitment opaque |
-| commitment | 128-bit Pedersen blinding | 128-bit Pedersen blinding | 128-bit Pedersen blinding |
-
-> **Wrap note**: `msg.value` is the gross amount; the fee is deducted before the
-> proof is verified. `Wrapped` and `WrapWithSnapshot` both emit the **net**
-> amount (post-fee). The fee is inferrable since `feeBps` is public.
-
-> **Unwrap note**: `unwrap` is non-payable — `msg.value` is always 0 at unwrap.
-> The recipient receives the net via an internal FLOW transfer, which is visible
-> as an internal transaction on the explorer regardless of what events are emitted.
-
-Aggregate `totalLocked` is **always public** — external observers can audit the
-pool size at any time. This is intentional boundary accounting.
-
-**Amount privacy on shielded transfers, transparency at boundaries — by design,
-not by accident.** Unwrap amounts are inherently public: the native FLOW transfer
-to the recipient is an internal transaction visible on any block explorer.
-Removing events would not make unwraps private — calldata, the internal value
-transfer, the `totalLocked` storage delta, and the contract balance delta all
-independently leak the amount. This is a property of EVM, not of this contract.
-
----
+Send FLOW, WFLOW, MockUSDC, or MockFT shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
 
 ## Install
 
@@ -135,233 +10,137 @@ independently leak the amount. This is a property of EVM, not of this contract.
 npm install @claucondor/sdk
 ```
 
-Peer dependencies (installed automatically):
-
-- `ethers` ^6 — Flow EVM provider
-- `@onflow/fcl` ^1.13 — Cadence transactions
-- `circomlibjs` ^0.1.7 — BabyJubJub + Pedersen
-- `snarkjs` ^0.7.6 — Groth16 proof generation
-
----
-
-## Token primitives
-
-Three concrete confidential tokens ship with the SDK. Privacy semantics are
-identical across all three — the difference is the underlying asset and the
-wrapping mechanism.
-
-| Token | Underlying | Recommended for |
-|---|---|---|
-| **`JanusFlow`** | Native FLOW | Cadence apps tipping / paying in FLOW |
-| `JanusFTCadence` | Any FungibleToken vault | Cadence-native FT integrations |
-| `JanusERC20` | ERC20 (MockUSDC on testnet) | EVM-DeFi apps |
-
-Most apps want **JanusFlow**.
-
----
-
-## JanusFlow — native FLOW (recommended)
-
-Deployed as a UUPS proxy at `0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078` on
-Flow EVM testnet, with a Cadence router façade at `0x5dcbeb41055ec57e`. Users
-sign normal Cadence transactions; the router orchestrates the cross-VM EVM call
-via the signer's COA.
-
-The full end-to-end walkthrough is in the [Quick start](#quick-start) above.
-Condensed notes on the caller's responsibilities:
-
-- **Persist every `(value, blinding)` pair** on the user's device. The contract
-  stores only the Pedersen commitment — the cleartext balance lives locally.
-- **Track `oldBalance` / `oldBlinding`** across transfers. After each
-  `shieldedTransfer` your new balance is `oldBalance − transferAmount` and your
-  new blinding is `newBlinding` (the one you passed to `buildShieldedTransferProof`).
-- **Amount range**: `transferAmount ≤ oldBalance` and `amount ∈ [0, 2^128)` —
-  effectively unbounded for any realistic use.
-
-### JanusFTCadence — any Cadence FungibleToken
-
-Cadence-only confidential-amount wrapper. Deployed at `0xbef3c77681c15397`.
+## Quick start: the `sdk.token(id)` API
 
 ```typescript
-import { JanusFTCadence, TX_FT_WRAP, TX_FT_SHIELDED_TRANSFER } from "@claucondor/sdk";
+import { sdk, deriveMemoKeyFromSignature } from '@claucondor/sdk';
+import { ethers } from 'ethers';
 
-const ft = await new JanusFTCadence({ network: "testnet" }).configure();
-const totalLocked = await ft.getTotalLocked();
-const commit      = await ft.balanceOfCommitment(someAddress);
+// 1. Create a wallet (e.g. from private key)
+const wallet = new ethers.Wallet(process.env.PRIVKEY!, provider);
 
-// State-changing flows use FCL — pass the exported templates:
-//   await fcl.mutate({ cadence: TX_FT_WRAP, args: ... })
-```
+// 2. Derive your persistent MemoKey (one signature → deterministic keypair)
+const sig = await wallet.signMessage('OpenJanus MemoKey v1');
+const memoKeypair = await deriveMemoKeyFromSignature(ethers.getBytes(sig));
 
-### JanusERC20 — ERC20 on Flow EVM (advanced)
+// 3. Publish your MemoKey (once — idempotent)
+const flow = sdk.token('flow');
+await flow.publishMemoKey(memoKeypair, wallet);
 
-Wraps an arbitrary ERC20 underlying. Deployed at
-`0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e` (pinned to `MockUSDC` — Flow EVM
-testnet has no canonical USDC). Same shielded-transfer privacy as JanusFlow;
-the wrap boundary is `approve + transferFrom` rather than `msg.value`.
+// 4. Wrap FLOW into your shielded slot
+const wrapResult = await flow.wrap({ grossAmount: 5n * 10n**18n }, wallet);
+console.log('Wrapped, net:', wrapResult.netAmount); // 4.995 FLOW (0.1% fee)
 
-```typescript
-import { JanusERC20 } from "@claucondor/sdk";
+// 5. Send a shielded tip to Bob (NO cleartext amount on chain)
+const snapshot = await flow.latestSnapshot(wallet.address, memoKeypair.privkey);
+await flow.shieldedTransfer({
+  recipient: BOB_EVM_ADDR,
+  amount: 2n * 10n**18n,
+  memo: 'great work!',
+  currentBalance: snapshot.balance,
+  currentBlinding: snapshot.blinding,
+}, wallet);
 
-const usdc = new JanusERC20();
-await usdc.connectWithSigner(wallet);
-
-// Approve first: underlying.approve(usdc.address, amount)
-await usdc.wrap({
-  amountRaw:   1_000_000n,             // 1 USDC at 6 decimals
-  txCommit:    [proof.commit.x, proof.commit.y],
-  amountProof: proof.proof,
-});
-await usdc.shieldedTransfer({ to, publicInputs, proof });
-```
-
----
-
-## ShieldedNote
-
-Every shielded transfer creates a Pedersen commitment delta `C_tx` — but the
-recipient only receives an elliptic-curve point. To later spend or unwrap, they
-need the plaintext `(amount, blinding)` pair that produced it. ShieldedNote is
-the canonical encrypted channel for shipping that payload alongside the transfer.
-
-```typescript
-import {
-  encryptShieldedNote,
-  decryptShieldedNote,
-  generateBabyJubKeypair,
-} from "@claucondor/sdk";
-
-// Sender: encrypt the note to the recipient's BabyJub pubkey
-const note = {
-  amount:   transferAmount,     // bigint, wei
-  blinding: transferBlinding,   // bigint, 128-bit secret
-  data:     "Thanks for the help last week!",  // optional UTF-8 app payload
-};
-const ciphertext = await encryptShieldedNote(note, recipientPubkey);
-// Attach ciphertext to your shielded transfer transaction
-
-// Recipient: decrypt on arrival
-const decoded = await decryptShieldedNote(
-  ciphertext.ciphertext,
-  ciphertext.ephemeralPubkey,
-  recipientPrivkey,
+// 6. Bob scans for incoming tips and unwraps
+const deposits = await flow.scanDeposits(BOB_EVM_ADDR);
+const note = await flow.decryptNoteTo(
+  deposits[0].ciphertext,
+  deposits[0].ephPubkey,
+  bobMemoKeypair.privkey
 );
-// decoded.amount, decoded.blinding, decoded.data — all available
+console.log('Received:', note.amount, 'memo:', note.memo);
+await flow.unwrap({
+  claimedAmount: note.amount,
+  recipient: BOB_EVM_ADDR,
+  currentBalance: note.amount,
+  currentBlinding: note.blinding,
+}, bobWallet);
 ```
 
-The wire format is versioned JSON (`{"v":1,"a":"...","b":"...","d":"..."}`)
-encrypted with ECIES + AES-GCM over BabyJubJub.
+## Token IDs
 
-PrivateTip uses this to carry the memo text + blinding end-to-end. For the
-theory, see the `/learn` page in the [PrivateTip demo](https://github.com/claucondor/private-tip).
+| ID | Variant | Contract |
+|----|---------|----------|
+| `flow` | native | `0x2458ae2d26797c2ffa3B4f6612Bdc4aDf22b7156` |
+| `wflow` | erc20 | `0x00129E94d5340bd19d0b4ed9CDf718BB6e0A9400` |
+| `mockusdc` | erc20 | `0xd45FDa099Cf67eD842eA379865AB08E18D62BAf3` |
+| `mockft` | cadence-ft | `0x7599043aea001283` (JanusMockFT) |
 
----
+All at feeBps=10 (0.1%).
 
-## Sign-derive: multi-device key recovery
-
-`generateBabyJubKeypair()` generates a fresh random scalar every call — correct
-for ephemeral ECIES keys, wrong for a user's persistent MemoKey. The sign-derive
-pattern solves this: derive the MemoKey deterministically from a wallet signature
-so any device with the same wallet recovers the same key.
+## ERC20 tokens: pre-approve before wrap
 
 ```typescript
-import { deriveBabyJubKeypairFromBytes } from "@claucondor/sdk";
-import { ethers } from "ethers";
+const usdc = sdk.token('mockusdc');
 
-// Prompt the user to sign a fixed message — the signature is the entropy source
-const sig      = await wallet.signMessage("Janus MemoKey v1");
-const sigBytes = ethers.getBytes(sig);   // 65-byte Uint8Array
+// Pre-approve underlying for grossAmount
+const underlying = new ethers.Contract(MOCK_USDC_ADDR, ERC20_ABI, wallet);
+await underlying.approve(usdc.address, 100n * 10n**6n);
 
-// Same wallet → same keypair, on any device, forever
-const memoKey = await deriveBabyJubKeypairFromBytes(sigBytes, "openjanus/memokey/v1");
-// { privkey: bigint, pubkey: { x: bigint, y: bigint } }
-
-// Publish memoKey.pubkey so senders can encrypt notes to you
-// Keep memoKey.privkey in memory only — never persisted, never on-chain
+// Then wrap
+await usdc.wrap({ grossAmount: 100n * 10n**6n }, wallet);
 ```
 
-The context string provides domain separation — you can derive independent keys
-from the same signature:
-```
-"openjanus/memokey/v1"   → persistent memo-encryption key
-"openjanus/viewkey/v1"   → read-only audit key (future)
-"openjanus/spendkey/v1"  → spend-authorization key (future)
-```
+## Reading state without signing
 
-Under the hood: HKDF-SHA256 over 64 bytes, reduced mod the BabyJub subgroup
-order, giving < 2^-127 statistical bias. Same pattern used by Phantom / Argent /
-Rabby for non-custodial encrypted messaging.
-
----
-
-## Module structure
-
-```
-@claucondor/sdk
-├── tokens/      JanusToken (abstract), JanusFlow (recommended),
-│                 JanusFTCadence, JanusFlowCadence (router helper),
-│                 JanusERC20 (advanced)
-├── crypto/      buildAmountDiscloseProof, buildShieldedTransferProof,
-│                 computeCommitmentV05, encryptShieldedNote, decryptShieldedNote,
-│                 deriveBabyJubKeypairFromBytes, generateBabyJubKeypair,
-│                 generateBlinding, encryptText, decryptText, flowToWei, weiToFlow
-├── primitives/  BabyJub, Pedersen, Groth16 (low-level)
-├── network/     createEvmProvider, createEvmWallet, COA helpers
-└── utils/       formatPoint, isValidFlowAddress, parseFlowToWei, hex helpers
+```typescript
+// All reads use a provider — no signer required
+const commitment = await sdk.token('flow').getCommitment(ALICE_EVM_ADDR);
+const memoKey = await sdk.token('flow').getMemoKey(ALICE_EVM_ADDR);
+const bps = await sdk.token('flow').feeBps(); // 10 = 0.1%
+const net = await sdk.token('flow').computeNet(5n * 10n**18n);
 ```
 
----
+## MemoKey: the persistence contract
 
-## Deployed contracts (Flow testnet)
+The MemoKey is a BabyJub keypair derived deterministically from a wallet signature. Publish the pubkey once; keep the privkey in memory only.
 
-| Contract | Network | Address |
-|---|---|---|
-| JanusFlow proxy | Flow EVM testnet | `0x09A3DCa868EcC39360fDe4E22046eCfcbA5b4078` |
-| JanusFlow impl | Flow EVM testnet | `0xa2607E9EAb1718a2fAf5a1328A7d3a9Aa854efff` |
-| AmountDiscloseVerifier | Flow EVM testnet | `0x9c83b2b1EFFD3bd375b9Bee93Cb618005D6A2Dc4` |
-| ConfidentialTransferVerifier | Flow EVM testnet | `0x48f791D2a4992F448Cc36F12e5500b6553e969b3` |
-| BabyJub.sol | Flow EVM testnet | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` |
-| JanusFlow.cdc router | Flow Cadence testnet | `0x5dcbeb41055ec57e` |
-| JanusFTCadence | Flow Cadence testnet | `0xbef3c77681c15397` |
-| JanusERC20 proxy | Flow EVM testnet | `0xf2C04b1A32B815ac7Ffd87a4C312096592BBCa1e` |
-| JanusERC20 impl | Flow EVM testnet | `0x7FE0B05ED77E0540519B6f10DD4b4521e867590D` |
-| MockUSDC (test underlying) | Flow EVM testnet | `0x3e8973dE565743Ef9748779bE377BBE050A13C22` |
-| Admin owner (COA, EVM) | Flow EVM testnet | `0x0000000000000000000000022f6b30af48a94787` |
+```typescript
+import { deriveMemoKeyFromSignature, MEMO_KEY_CONTEXT } from '@claucondor/sdk';
 
----
-
-## Trusted setup
-
-The Groth16 verifiers are backed by a two-phase ceremony:
-
-- **Phase 1 (universal)**: `powersOfTau28_hez_final_18.ptau` — Hermez pot18
-  transcript, 200+ contributors via the Polygon community. Canonical source:
-  `https://storage.googleapis.com/zkevm/ptau/`.
-- **Phase 2 (circuit-specific)**: one named contributor, entropy from
-  `openssl rand -hex 32` not logged per protocol.
-- **Beacon randomness**: Flow VRF, testnet block `324,226,714`, block ID
-  `6e470bc1fc410b1a12b72991da0a8b4d7cfc5c8872eff0a3d57ae0c8ecffdc7a`.
-- **Full provenance**: contribution hashes, beacon hash, and `ZKey Ok!` verification
-  results live in `circuits/CEREMONY-RECORD.json` (shipped with the SDK).
-
----
-
-## Tests
-
-```bash
-# Unit tests (no network, ~3 seconds; ~30s with real proofs)
-npm test
-SKIP_PROOF_TESTS=1 npm test    # skip the snarkjs proof tests
-
-# Integration tests (read-only Flow testnet)
-RUN_INTEGRATION=1 npm run test:integration
-
-# All
-npm run test:all
+// On any device with the same wallet, you get the same keypair:
+const sig = await wallet.signMessage('OpenJanus MemoKey v1');
+const keypair = await deriveMemoKeyFromSignature(ethers.getBytes(sig));
+// keypair.pubkey  → publish on-chain
+// keypair.privkey → decrypt snapshots + notes (never persisted)
 ```
 
----
+## Snapshot recovery
+
+If you lose local state, reconstruct from on-chain events:
+
+```typescript
+const snapshot = await sdk.token('flow').latestSnapshot(MY_EVM_ADDR, memoPrivKey);
+console.log('Recovered balance:', snapshot.balance);
+console.log('Recovered blinding:', snapshot.blinding);
+// timestampMs is ALWAYS in milliseconds
+console.log('As of:', new Date(snapshot.timestampMs).toISOString());
+```
+
+## Advanced: orchestration layer (for custom adapters)
+
+The SDK exposes its internal proof-building pipeline for power users:
+
+```typescript
+import { orchestrateWrap, orchestrateShieldedTransfer, orchestrateUnwrap } from '@claucondor/sdk';
+
+// orchestrateWrap returns: { netAmount, fee, txCommit, amountProof, encryptedSnapshot, ... }
+// orchestrateShieldedTransfer returns: { publicInputs, proof, encryptedSnapshot, encryptedNoteTo, ... }
+// orchestrateUnwrap returns: { txCommit, amountProof, transferPublicInputs, transferProof, ... }
+```
+
+## Architecture
+
+See `docs/ARCHITECTURE.md` for the full 4-layer model.
+
+## Privacy properties
+
+- **wrap/unwrap**: amount VISIBLE at boundary (by design — auditable custody accounting)
+- **shieldedTransfer**: amount HIDDEN on calldata, events, AND storage
+- **Commitment opacity**: 128-bit Pedersen blinding — brute-force infeasible
+- **Forward secrecy**: fresh ephemeral per shieldedTransfer — two sends to same recipient are unlinkable
+- **Note encryption**: BabyJub ECIES + AES-256-GCM
 
 ## License
 
-MIT — oydual3 <claucondor@gmail.com>
+MIT

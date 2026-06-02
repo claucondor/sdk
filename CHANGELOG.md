@@ -1,6 +1,62 @@
 # Changelog
 
-All notable changes to `@openjanus/sdk` are documented here.
+---
+
+## 0.6.0 — 2026-06-01
+
+**First production-ready release. Supersedes all prior versions.**
+
+v0.5.x was testnet scaffolding. v0.6 is the release shipping with PrivateTip mainnet launch (~2026-06-15).
+
+### Architecture rewrite
+
+- **4-layer model**: adapters / orchestration / crypto+proof / network. See `docs/ARCHITECTURE.md`.
+- **Generic adapters**: `JanusFlowAdapter` (native), `JanusERC20Adapter` (ERC20), `JanusFTAdapter` (Cadence FT) — parameterized via TOKEN_REGISTRY.
+- **Single entry point**: `sdk.token('flow' | 'wflow' | 'mockusdc' | 'mockft')` returns a `JanusTokenAdapter`. Frontend stays dumb.
+- **All orchestration in SDK**: `orchestration/wrap.ts`, `orchestration/shielded-transfer.ts`, `orchestration/unwrap.ts` own gross→net→proof→encrypt→params.
+- **TOKEN_REGISTRY**: `network/contracts.ts` — single address source of truth.
+
+### New tokens
+
+- `wflow` — JanusWFLOW (ERC20, proxy `0x00129E94d5340bd19d0b4ed9CDf718BB6e0A9400`)
+- `mockusdc` — JanusMockUSDC (ERC20, proxy `0xd45FDa099Cf67eD842eA379865AB08E18D62BAf3`)
+- `mockft` — JanusMockFT (Cadence FT, `0x7599043aea001283`)
+
+### New v0.6 EVM ABI surface
+
+```solidity
+// shieldedTransfer now has 9 params (was 6 in v0.5):
+function shieldedTransfer(
+  address to,
+  uint256[6] publicInputs, uint256[8] proof,
+  bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY,
+  bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY
+) external;
+```
+
+### Breaking changes from v0.5 (for PrivateTip Track D)
+
+| Old (v0.5) | New (v0.6) |
+|---|---|
+| 6-param `shieldedTransfer` calldata builder | 9-param — `encryptedNoteTo + ephPubkeyToX/Y` added |
+| `memoKeys` unified struct | `memoKeyPubX(addr)` + `memoKeyPubY(addr)` separate |
+| `encryptMemo` helper | `encryptNote({amount, blinding, memo}, pubkey)` |
+| Snapshot timestamps in seconds | `SNAPSHOT_TIMESTAMP_UNIT = 'ms'` always milliseconds |
+| `new JanusFlow().wrap(params)` direct | `sdk.token('flow').wrap({grossAmount}, signer)` orchestrated |
+| Proof built by app code | Proof built internally by orchestration |
+| `buildAmountDiscloseProof` exposed to app | Internal to SDK; still exported for advanced use |
+
+### Crypto schemas
+
+- `crypto/snapshot-schema.ts`: `encryptSnapshot` / `decryptSnapshot`, wire format v=2
+- `crypto/note-schema.ts`: `encryptNote` / `decryptNote`, wire format v=1 with `{amt, bld, memo, tip}` fields
+- `crypto/memokey.ts`: `deriveMemoKeyFromSignature` — canonical MemoKey from wallet signature
+
+### Tests
+
+- 260 unit tests, all green
+- Integration tests: token-adapter-contract, cross-token-memokey, gross-net-ordering, forward-secrecy, scan-recovery
+- E2E Track F gate: `tests/e2e/cross-token-tip.test.ts`
 
 ---
 

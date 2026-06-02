@@ -1,6 +1,65 @@
-# @openjanus/sdk Architecture
+# @claucondor/sdk Architecture — v0.6.0
 
-## Module hierarchy
+## The 4-layer model
+
+```
+┌─────────────────────────────────────────┐
+│            ADAPTERS                      │  ← Public API: sdk.token(id)
+│  JanusFlowAdapter / JanusERC20Adapter   │     Frontend calls only this layer.
+│  JanusFTAdapter                          │
+└────────────────┬────────────────────────┘
+                 │ delegates to
+┌────────────────▼────────────────────────┐
+│          ORCHESTRATION                   │  ← ALL ordering logic lives here.
+│  wrap.ts / shielded-transfer.ts         │     gross→net→proof→encrypt→params.
+│  unwrap.ts                               │
+└────────────────┬────────────────────────┘
+                 │ calls
+┌────────────────▼────────────────────────┐
+│        CRYPTO + PROOF                    │  ← Pure crypto, no side effects.
+│  snapshot-schema / note-schema          │
+│  amount-disclose / shielded-transfer    │
+│  memokey / ecdh / pi-b-swap             │
+└────────────────┬────────────────────────┘
+                 │ uses
+┌────────────────▼────────────────────────┐
+│           NETWORK                        │  ← Chain I/O only.
+│  evm-client / flow-client               │
+│  contracts.ts (TOKEN_REGISTRY)          │
+│  scan/ (event-scanner, latest-snapshot) │
+└─────────────────────────────────────────┘
+```
+
+## Timestamp convention
+
+`SNAPSHOT_TIMESTAMP_UNIT = 'ms'` — all timestamps are milliseconds. This constant is the single authoritative source. The v0.5.6/5.7 bug was a unit mismatch (scanner used seconds, reconstructor used milliseconds).
+
+## KEY RULE: Wrap proof binds to NET, not GROSS
+
+```
+grossAmount → contract (msg.value or transferFrom)
+netAmount = grossAmount - fee   ← proof MUST bind to this
+fee goes to feeRecipient
+```
+
+Passing grossAmount to `buildAmountDiscloseProof` causes a silent verification revert.
+
+## KEY RULE: Unwrap proof binds to CLAIMED (full debit), not net
+
+```
+claimedAmount → proof (full debit from commitment)
+netToRecipient = claimedAmount - fee   ← what recipient actually gets
+```
+
+## EVM ABI: selector trap
+
+Use canonical `uint256[N]`, NOT `uint[N]`. Wrong selectors cause silent reverts.
+
+## Cadence FT: pi_b swap
+
+Apply `applyPiBSwap` before flattening proof to `[UInt256]`. Without this, `_verifyGroth16` silently returns false. The SDK applies this automatically in all orchestration paths.
+
+## Module hierarchy (v0.3 era — preserved below)
 
 ```
 src/
