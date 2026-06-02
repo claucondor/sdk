@@ -9,7 +9,7 @@ import {
   computeWrapFee,
   computeNetUnwrap,
   computeUnwrapFee,
-} from "../../src/tokens/janus-flow";
+} from "../../src/crypto/fee-math";
 
 describe("computeNetWrap", () => {
   it("0 bps: net == gross (no fee)", () => {

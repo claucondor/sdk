@@ -144,9 +144,7 @@ export {
   computeWrapFee,
   computeNetUnwrap,
   computeUnwrapFee,
-  getFeeBps,
-  getFeeRecipient,
-} from "./tokens/janus-flow";
+} from "./crypto/fee-math";
 
 // Pedersen commitment helpers
 export { computeCommitmentV05 as computeCommitment } from "./primitives/pedersen";
@@ -162,17 +160,3 @@ export {
   getCoaBalanceWei,
   getFlowVaultBalanceWei,
 } from "./network";
-
-// ---------------------------------------------------------------------------
-// Legacy token classes — kept for backward compatibility with v0.5 consumers
-// that import JanusFlow / JanusERC20 directly. These are the SAME classes,
-// just re-exported under their old names.
-// ---------------------------------------------------------------------------
-export {
-  JanusFlow,
-  JanusFlowCadence,
-  JanusERC20,
-  JanusFTCadence,
-  JANUS_FLOW_EVM_ADDRESS,
-  JANUS_FLOW_CADENCE_ADDRESS,
-} from "./tokens";

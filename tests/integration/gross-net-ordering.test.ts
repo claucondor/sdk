@@ -14,7 +14,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { sdk } from "../../src/index";
 import { deriveMemoKeyFromSignature } from "../../src/crypto/memokey";
 import { computeCommitmentV05 as computeCommitment } from "../../src/primitives/pedersen";
-import { computeNetWrap, computeWrapFee } from "../../src/tokens/janus-flow";
+import { computeNetWrap, computeWrapFee } from "../../src/crypto/fee-math";
 import { ethers } from "ethers";
 import { NETWORK_CONFIG } from "../../src/network/flow-client";
 

@@ -25,7 +25,7 @@
  */
 
 import { applyPiBSwap, evmProofToUint256Array } from "../utils/pi-b-swap.js";
-import { computeCommitmentV05 as computeCommitment } from "../primitives/pedersen.js";
+import { computeCommitment } from "../primitives/pedersen.js";
 import type { Point } from "../types/commitment.js";
 import type { SnarkJSProof, ProofUint256 } from "../types/proof.js";
 
@@ -59,8 +59,8 @@ async function getCircuitPaths(): Promise<CircuitPaths> {
   const __dirname = dirname(__filename);
   const PACKAGE_ROOT = resolve(__dirname, "..", "..");
   _circuitPaths = {
-    wasm: resolve(PACKAGE_ROOT, "circuits/v0.5.1/confidential_transfer.wasm"),
-    zkey: resolve(PACKAGE_ROOT, "circuits/v0.5.1/confidential_transfer_final.zkey"),
+    wasm: resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer.wasm"),
+    zkey: resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer_final.zkey"),
   };
   return _circuitPaths;
 }
@@ -139,9 +139,9 @@ export async function buildShieldedTransferProof(
   }
 
   // Input range guards (loud failure beats silent witness rejection)
-  if (input.oldBalance < 0n || input.oldBalance >= 1n << 128n) {
+  if (input.oldBalance < 0n || input.oldBalance >= 1n << 64n) {
     throw new RangeError(
-      `buildShieldedTransferProof: oldBalance must be in [0, 2^128), got ${input.oldBalance}`
+      `buildShieldedTransferProof: oldBalance must be in [0, 2^64), got ${input.oldBalance}`
     );
   }
   if (input.transferAmount < 0n || input.transferAmount > input.oldBalance) {

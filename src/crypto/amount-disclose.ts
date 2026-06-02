@@ -28,7 +28,7 @@
  */
 
 import { applyPiBSwap, evmProofToUint256Array } from "../utils/pi-b-swap.js";
-import { computeCommitmentV05 as computeCommitment } from "../primitives/pedersen.js";
+import { computeCommitment } from "../primitives/pedersen.js";
 import type { Point } from "../types/commitment.js";
 import type { SnarkJSProof, ProofUint256 } from "../types/proof.js";
 
@@ -61,8 +61,8 @@ async function getCircuitPaths(): Promise<CircuitPaths> {
   const __dirname = dirname(__filename);
   const PACKAGE_ROOT = resolve(__dirname, "..", "..");
   _circuitPaths = {
-    wasm: resolve(PACKAGE_ROOT, "circuits/v0.5.1/amount_disclose.wasm"),
-    zkey: resolve(PACKAGE_ROOT, "circuits/v0.5.1/amount_disclose_final.zkey"),
+    wasm: resolve(PACKAGE_ROOT, "circuits/v0.3/amount_disclose.wasm"),
+    zkey: resolve(PACKAGE_ROOT, "circuits/v0.3/amount_disclose_final.zkey"),
   };
   return _circuitPaths;
 }
@@ -128,9 +128,9 @@ export async function buildAmountDiscloseProof(
     zkeyPath = zkeyPath ?? paths.zkey;
   }
 
-  if (input.amount < 0n || input.amount >= 1n << 128n) {
+  if (input.amount < 0n || input.amount >= 1n << 64n) {
     throw new RangeError(
-      `buildAmountDiscloseProof: amount must be in [0, 2^128), got ${input.amount}`
+      `buildAmountDiscloseProof: amount must be in [0, 2^64), got ${input.amount}`
     );
   }
   if (input.blinding < 0n || input.blinding >= 1n << 128n) {

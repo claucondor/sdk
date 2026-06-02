@@ -43,6 +43,10 @@ import { orchestrateShieldedTransfer } from "../orchestration/shielded-transfer"
 import { orchestrateUnwrap } from "../orchestration/unwrap";
 import { decryptSnapshot } from "../crypto/snapshot-schema";
 import { decryptNote } from "../crypto/note-schema";
+import {
+  scanCadenceSnapshots,
+  scanCadenceIncomingNotes,
+} from "../scan/cadence-scanner";
 
 // Cadence transaction templates for JanusMockFT v0.6
 // These templates use the contract at the configured cadenceAddress
@@ -433,10 +437,27 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
     return { txHash: txId, netToRecipient: orch.netToRecipient };
   }
 
-  // Cadence FT doesn't emit EVM events — scan returns empty for now.
-  // A full Cadence event scanner is a v0.7 deliverable.
-  async scanDeposits(_addr: string, _fromBlock?: bigint): Promise<DepositRecord[]> {
-    return [];
+  /**
+   * Scan ShieldedTransferWithSnapshot events on JanusMockFT for incoming notes
+   * addressed to `addr`. Uses Flow REST events API.
+   */
+  async scanDeposits(addr: string, fromBlock?: bigint): Promise<DepositRecord[]> {
+    const records = await scanCadenceIncomingNotes(
+      addr,
+      this.entry.cadenceAddress,
+      this.entry.contractName,
+      {
+        accessApi: this.accessApiUrl,
+        ...(fromBlock !== undefined ? { fromBlock: Number(fromBlock) } : {}),
+      }
+    );
+    return records.map((r) => ({
+      ciphertext: r.ciphertext,
+      ephPubkey: r.ephPubkey,
+      timestampMs: r.timestampMs,
+      txHash: r.txHash,
+      blockNumber: r.blockHeight,
+    }));
   }
 
   async decryptNoteTo(blob: Uint8Array, ephPub: Point, myMemoPrivKey: bigint): Promise<NoteContent> {
@@ -449,10 +470,33 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
     return result;
   }
 
-  async latestSnapshot(_addr: string, _myMemoPrivKey: bigint): Promise<SnapshotContent> {
-    throw new Error(
-      "JanusFTAdapter.latestSnapshot: Cadence event scanning not yet implemented (v0.7). " +
-      "Track your balance locally from wrap/shieldedTransfer/unwrap return values."
+  /**
+   * Reconstruct the latest shielded state from on-chain Cadence events.
+   * Scans WrapWithSnapshot / ShieldedTransferWithSnapshot (sender side) /
+   * UnwrapWithSnapshot, decrypts each blob, picks highest timestampMs.
+   */
+  async latestSnapshot(addr: string, myMemoPrivKey: bigint): Promise<SnapshotContent> {
+    const events = await scanCadenceSnapshots(
+      addr,
+      this.entry.cadenceAddress,
+      this.entry.contractName,
+      { accessApi: this.accessApiUrl }
     );
+    if (events.length === 0) {
+      throw new Error(`JanusFTAdapter.latestSnapshot: no snapshot events found for ${addr}`);
+    }
+
+    const decoded: SnapshotContent[] = [];
+    for (const ev of events) {
+      const snap = await decryptSnapshot(ev.ciphertext, ev.ephPubkey, myMemoPrivKey);
+      if (snap !== null) decoded.push(snap);
+    }
+    if (decoded.length === 0) {
+      throw new Error(
+        `JanusFTAdapter.latestSnapshot: ${events.length} snapshot events found for ${addr} but none decrypted with the supplied memoPrivKey`
+      );
+    }
+    decoded.sort((a, b) => b.timestampMs - a.timestampMs);
+    return decoded[0]!;
   }
 }

@@ -7,8 +7,6 @@ export default defineConfig({
     "network/index": "src/network/index.ts",
     "crypto/index": "src/crypto/index.ts",
     "utils/index": "src/utils/index.ts",
-    "tokens/index": "src/tokens/index.ts",
-    "recovery/index": "src/recovery/index.ts",
     // v0.6 new modules
     "adapters/index": "src/adapters/index.ts",
     "orchestration/index": "src/orchestration/index.ts",
