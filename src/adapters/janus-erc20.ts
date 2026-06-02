@@ -1,10 +1,14 @@
 /**
- * adapters/janus-erc20.ts — JanusTokenAdapter for variant="erc20".
+ * adapters/janus-erc20.ts — JanusTokenAdapter for variant="erc20" (v0.6.3+).
  *
  * Wraps an ERC20 underlying via approve+transferFrom (non-payable wrap).
  * Parameterized by TOKEN_REGISTRY entry — one instance per proxy.
  *
- * wrap() signature differs from JanusFlow:
+ * v0.6.3 change: MemoKey reads/writes now go through the shared MemoKeyRegistry
+ * (MEMO_REGISTRY_ADDRESS). publishMemoKey sends a tx to the registry; getMemoKey
+ * reads from the registry. The token proxy no longer manages memo keys.
+ *
+ * wrap() signature:
  *   wrap(uint256 amount, uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external
  *
  * GROSS amount is passed as `amount`. SDK computes net and builds proof for net.
@@ -28,7 +32,7 @@ import type {
 } from "../types";
 import type { Point } from "../types/commitment";
 import type { ERC20TokenEntry } from "../types";
-import { FLOW_EVM_RPC } from "../network/contracts";
+import { FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS } from "../network/contracts";
 import { orchestrateWrap } from "../orchestration/wrap";
 import { orchestrateShieldedTransfer } from "../orchestration/shielded-transfer";
 import { orchestrateUnwrap } from "../orchestration/unwrap";
@@ -41,13 +45,18 @@ const ERC20_JANUS_ABI = [
   "function wrap(uint256 amount, uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
   "function shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY) external",
   "function unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
-  "function publishMemoKey(uint256 pubkeyX, uint256 pubkeyY) external",
-  "function memoKeyPubX(address) view returns (uint256)",
-  "function memoKeyPubY(address) view returns (uint256)",
   "function feeBps() view returns (uint16)",
   "function feeRecipient() view returns (address)",
   "function firstSnapshotBlock(address) view returns (uint256)",
   "function balanceOfCommitmentXY(address) view returns (uint256, uint256)",
+  "function memoRegistry() view returns (address)",
+] as const;
+
+/** v0.6.3 — MemoKey operations go directly to the shared registry. */
+const MEMO_REGISTRY_ABI = [
+  "function publishMemoKey(uint256 x, uint256 y) external",
+  "function rotateMemoKey(uint256 newX, uint256 newY) external",
+  "function getMemoKey(address user) view returns (uint256 x, uint256 y, uint256 publishedAt)",
 ] as const;
 
 const ERC20_APPROVE_ABI = [
@@ -63,12 +72,15 @@ export class JanusERC20Adapter implements JanusTokenAdapter {
   readonly underlyingAddress: string;
 
   private readonly provider: ethers.JsonRpcProvider;
+  /** Address of the shared MemoKeyRegistry (defaults to MEMO_REGISTRY_ADDRESS). */
+  readonly memoRegistryAddress: string;
 
   constructor(id: string, entry: ERC20TokenEntry, rpcUrl = FLOW_EVM_RPC) {
     this.id = id;
     this.address = entry.proxy;
     this.decimals = entry.decimals;
     this.underlyingAddress = entry.underlying;
+    this.memoRegistryAddress = MEMO_REGISTRY_ADDRESS;
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
   }
 
@@ -78,6 +90,16 @@ export class JanusERC20Adapter implements JanusTokenAdapter {
 
   private _rw(signer: EVMSigner): ethers.Contract {
     return new ethers.Contract(this.address, ERC20_JANUS_ABI, signer);
+  }
+
+  /** Read-only handle on the shared MemoKeyRegistry. */
+  private _registry(): ethers.Contract {
+    return new ethers.Contract(this.memoRegistryAddress, MEMO_REGISTRY_ABI, this.provider);
+  }
+
+  /** Read-write handle on the shared MemoKeyRegistry (requires signer). */
+  private _registryRw(signer: EVMSigner): ethers.Contract {
+    return new ethers.Contract(this.memoRegistryAddress, MEMO_REGISTRY_ABI, signer);
   }
 
   async getBalance(addr: string): Promise<bigint> {
@@ -92,10 +114,8 @@ export class JanusERC20Adapter implements JanusTokenAdapter {
   }
 
   async getMemoKey(addr: string): Promise<{ x: bigint; y: bigint } | null> {
-    const [x, y] = await Promise.all([
-      this._ro().memoKeyPubX(addr),
-      this._ro().memoKeyPubY(addr),
-    ]);
+    // v0.6.3: reads from the shared MemoKeyRegistry, not the per-token mapping.
+    const [x, y] = await this._registry().getMemoKey(addr);
     const xb = BigInt(x);
     const yb = BigInt(y);
     if (xb === 0n && yb === 0n) return null;
@@ -123,7 +143,19 @@ export class JanusERC20Adapter implements JanusTokenAdapter {
   }
 
   async publishMemoKey(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult> {
-    const tx = await this._rw(signer).publishMemoKey(
+    // v0.6.3: publishes to the shared MemoKeyRegistry directly (NOT the token proxy).
+    // One tx registers the user's key for ALL Janus EVM tokens simultaneously.
+    const tx = await this._registryRw(signer).publishMemoKey(
+      memoKeypair.pubkey.x,
+      memoKeypair.pubkey.y
+    );
+    const receipt = await tx.wait();
+    return { txHash: receipt.hash };
+  }
+
+  /** Rotate the caller's BabyJub pubkey in the shared registry. */
+  async rotateMemoKey(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult> {
+    const tx = await this._registryRw(signer).rotateMemoKey(
       memoKeypair.pubkey.x,
       memoKeypair.pubkey.y
     );

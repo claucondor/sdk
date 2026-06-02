@@ -1,20 +1,28 @@
 /**
- * adapters/janus-flow.ts — JanusTokenAdapter for variant="native" (JanusFlow, JanusFlow_v0_6).
+ * adapters/janus-flow.ts — JanusTokenAdapter for variant="native" (JanusFlow v0.6.3+).
  *
  * Wraps native FLOW via msg.value. One instance per proxy address.
  * Parameterized by TOKEN_REGISTRY entry — not a separate class per token.
  *
- * ABI surface (v0.6):
+ * v0.6.3 change: MemoKey reads/writes now go through MemoKeyRegistry
+ * (MEMO_REGISTRY_ADDRESS), NOT the per-token proxy. publishMemoKey sends
+ * a tx to the registry directly. getMemoKey reads from the registry.
+ * Tokens become read-only consumers of the registry.
+ *
+ * ABI surface (v0.6.3 proxy):
  *   wrap(uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable
  *   shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY) external
  *   unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external
- *   publishMemoKey(uint256 pubkeyX, uint256 pubkeyY) external
- *   memoKeyPubX(address) view returns (uint256)
- *   memoKeyPubY(address) view returns (uint256)
  *   feeBps() view returns (uint16)
  *   feeRecipient() view returns (address)
  *   firstSnapshotBlock(address) view returns (uint256)
  *   balanceOfCommitmentXY(address) view returns (uint256, uint256)
+ *   memoRegistry() view returns (address)
+ *
+ * MemoKeyRegistry ABI (for publishMemoKey / rotateMemoKey / getMemoKey):
+ *   publishMemoKey(uint256 x, uint256 y) external
+ *   rotateMemoKey(uint256 newX, uint256 newY) external
+ *   getMemoKey(address user) view returns (uint256 x, uint256 y, uint256 publishedAt)
  */
 
 import { ethers } from "ethers";
@@ -34,7 +42,7 @@ import type {
 } from "../types";
 import type { Point } from "../types/commitment";
 import type { NativeTokenEntry } from "../types";
-import { FLOW_EVM_RPC } from "../network/contracts";
+import { FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS } from "../network/contracts";
 import { orchestrateWrap } from "../orchestration/wrap";
 import { orchestrateShieldedTransfer } from "../orchestration/shielded-transfer";
 import { orchestrateUnwrap } from "../orchestration/unwrap";
@@ -47,13 +55,18 @@ const NATIVE_ABI = [
   "function wrap(uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable",
   "function shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY) external",
   "function unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
-  "function publishMemoKey(uint256 pubkeyX, uint256 pubkeyY) external",
-  "function memoKeyPubX(address) view returns (uint256)",
-  "function memoKeyPubY(address) view returns (uint256)",
   "function feeBps() view returns (uint16)",
   "function feeRecipient() view returns (address)",
   "function firstSnapshotBlock(address) view returns (uint256)",
   "function balanceOfCommitmentXY(address) view returns (uint256, uint256)",
+  "function memoRegistry() view returns (address)",
+] as const;
+
+/** v0.6.3 — MemoKey operations go directly to the shared registry. */
+const MEMO_REGISTRY_ABI = [
+  "function publishMemoKey(uint256 x, uint256 y) external",
+  "function rotateMemoKey(uint256 newX, uint256 newY) external",
+  "function getMemoKey(address user) view returns (uint256 x, uint256 y, uint256 publishedAt)",
 ] as const;
 
 export class JanusFlowAdapter implements JanusTokenAdapter {
@@ -61,6 +74,8 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
   readonly variant = "native" as const;
   readonly address: string;
   readonly decimals: number;
+  /** Address of the shared MemoKeyRegistry (defaults to MEMO_REGISTRY_ADDRESS). */
+  readonly memoRegistryAddress: string;
 
   private readonly provider: ethers.JsonRpcProvider;
 
@@ -68,6 +83,7 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
     this.id = id;
     this.address = entry.proxy;
     this.decimals = entry.decimals;
+    this.memoRegistryAddress = MEMO_REGISTRY_ADDRESS;
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
   }
 
@@ -77,6 +93,16 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
 
   private _rw(signer: EVMSigner): ethers.Contract {
     return new ethers.Contract(this.address, NATIVE_ABI, signer);
+  }
+
+  /** Read-only handle on the shared MemoKeyRegistry. */
+  private _registry(): ethers.Contract {
+    return new ethers.Contract(this.memoRegistryAddress, MEMO_REGISTRY_ABI, this.provider);
+  }
+
+  /** Read-write handle on the shared MemoKeyRegistry (requires signer). */
+  private _registryRw(signer: EVMSigner): ethers.Contract {
+    return new ethers.Contract(this.memoRegistryAddress, MEMO_REGISTRY_ABI, signer);
   }
 
   async getBalance(addr: string): Promise<bigint> {
@@ -89,10 +115,8 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
   }
 
   async getMemoKey(addr: string): Promise<{ x: bigint; y: bigint } | null> {
-    const [x, y] = await Promise.all([
-      this._ro().memoKeyPubX(addr),
-      this._ro().memoKeyPubY(addr),
-    ]);
+    // v0.6.3: reads from the shared MemoKeyRegistry, not the per-token mapping.
+    const [x, y, publishedAt] = await this._registry().getMemoKey(addr);
     const xb = BigInt(x);
     const yb = BigInt(y);
     if (xb === 0n && yb === 0n) return null;
@@ -120,7 +144,19 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
   }
 
   async publishMemoKey(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult> {
-    const tx = await this._rw(signer).publishMemoKey(
+    // v0.6.3: publishes to the shared MemoKeyRegistry directly (NOT the token proxy).
+    // One tx registers the user's key for ALL Janus EVM tokens simultaneously.
+    const tx = await this._registryRw(signer).publishMemoKey(
+      memoKeypair.pubkey.x,
+      memoKeypair.pubkey.y
+    );
+    const receipt = await tx.wait();
+    return { txHash: receipt.hash };
+  }
+
+  /** Rotate the caller's BabyJub pubkey in the shared registry. */
+  async rotateMemoKey(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult> {
+    const tx = await this._registryRw(signer).rotateMemoKey(
       memoKeypair.pubkey.x,
       memoKeypair.pubkey.y
     );

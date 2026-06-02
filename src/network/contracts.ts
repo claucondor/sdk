@@ -56,6 +56,15 @@ export const VERIFIERS = {
 } as const;
 
 /**
+ * Shared MemoKeyRegistry — deployed once, read by all Janus EVM token proxies.
+ * EVM-only users call publishMemoKey() directly on this contract (one tx covers
+ * all tokens). Cadence users call the cross-VM transaction publish_memokey_xvm.cdc
+ * which calls this registry from their COA in the same tx that writes to Cadence
+ * storage. Introduced in v0.6.3 (Track B++).
+ */
+export const MEMO_REGISTRY_ADDRESS = "0x05D104962ff087441f26BA11A1E1C3b9E091D663";
+
+/**
  * Fee rate used by all v0.6 deployed contracts.
  * 10 bps = 0.1%. The SDK reads this from chain for each operation
  * but this constant is used in tests and fee previews.
