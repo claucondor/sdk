@@ -68,10 +68,17 @@ export interface JanusTokenAdapter {
 
   /**
    * Register the caller's BabyJub pubkey on-chain.
-   * Must be called once before anyone can send you shielded notes.
-   * Idempotent — safe to call again if the pubkey hasn't changed.
+   * v0.6.3: EVM adapters route this to the shared MemoKeyRegistry (one tx
+   * covers all Janus EVM tokens simultaneously). Call once; rotate later.
    */
   publishMemoKey(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult>;
+
+  /**
+   * Rotate to a new BabyJub pubkey. Must have published first.
+   * v0.6.3: EVM adapters route this to the shared MemoKeyRegistry.
+   * Optional — not all adapters support rotation (Cadence FT adapter omits it).
+   */
+  rotateMemoKey?(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult>;
 
   /**
    * Wrap grossAmount into the caller's shielded slot.

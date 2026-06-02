@@ -2,6 +2,34 @@
 
 ---
 
+## 0.6.3 — 2026-06-02
+
+**MemoKeyRegistry unification — single publishMemoKey covers all Janus tokens.**
+
+### Architecture change (Track B++)
+
+- New `MemoKeyRegistry` immutable EVM contract (`0x05D104962ff087441f26BA11A1E1C3b9E091D663`). All Janus EVM token proxies read BabyJub pubkeys from here instead of per-token mappings.
+- All 3 EVM proxies (JanusFlow, JanusWFLOW, JanusMockUSDC) upgraded to canonical implementations (`JanusFlow` / `JanusERC20` contract names — no version suffix). `memoRegistry` wired to the shared registry at slot 90.
+- Deprecated `memoKeyPubX`/`memoKeyPubY` per-token mappings kept at slots 7-8 for UUPS storage safety (marked as dead state).
+
+### SDK changes
+
+- `MEMO_REGISTRY_ADDRESS` exported from `network/contracts.ts` and `network/index.ts`.
+- `JanusFlowAdapter.publishMemoKey()` now routes to `MemoKeyRegistry` directly (one tx = registered on all EVM tokens).
+- `JanusERC20Adapter.publishMemoKey()` same.
+- `getMemoKey()` in both EVM adapters reads from `MemoKeyRegistry.getMemoKey()` instead of per-token mapping getters.
+- `rotateMemoKey()` added to both EVM adapters (+ optional interface method on `JanusTokenAdapter`).
+- `memoRegistryAddress` property exposed on both EVM adapter classes.
+- New Cadence transaction: `transactions/publish_memokey_xvm.cdc` — single Cadence tx that publishes to BOTH Cadence storage (`/storage/openjanusMemoKey`) AND the EVM registry via COA cross-VM call.
+
+### Repo cleanup
+
+- Deleted versioned contract files: `JanusToken_v0_6.sol`, `JanusToken_v0_6_3.sol`, `JanusFlow_v0_6.sol`, `JanusFlow_v0_6_3.sol`, `JanusERC20_v0_6.sol`, `JanusERC20_v0_6_3.sol`.
+- Canonical contract files: `JanusToken.sol`, `JanusFlow.sol`, `JanusERC20.sol`.
+- Deleted legacy Cadence spike: `JanusFT.cdc` + dead transactions (`wrap_ft.cdc`, `unwrap_ft.cdc`, `shielded_transfer_ft.cdc`, `setup_janus_ft_registry.cdc`).
+- Removed `JanusFT` from `flow.json` and `flow.spike.json`.
+- Cleaned `v0.6` version labels from `JanusMockFT.cdc` comments.
+
 ## 0.6.2 — 2026-06-02
 
 Doc-only: README header now correctly reads v0.6.2 (0.6.0 / 0.6.1 had a stale header that said v0.6.0).
