@@ -1,13 +1,14 @@
 /**
  * network/contracts.ts — TOKEN_REGISTRY and VERIFIERS
  *
- * Single source of truth for all v0.6 testnet addresses.
+ * Single source of truth for all v0.6.6 testnet addresses.
  * The SDK never hard-codes addresses anywhere else — import from here.
  *
  * TOKEN_REGISTRY keys are the stable token IDs used by sdk.token(id).
  * VERIFIERS holds the shared Groth16 verifier addresses (same across all tokens).
  *
- * All addresses confirmed from Track A+/B/B+ deployments (2026-05-31).
+ * All addresses from v0.6.6 clean deploy (2026-06-03).
+ * Admin: Cadence 0xc4e8f99915893a2f, COA 0x000000000000000000000002656f9205e386ed78
  */
 
 import type {
@@ -19,21 +20,14 @@ import type {
 export const TOKEN_REGISTRY = {
   flow: {
     variant: "native",
-    proxy: "0x2458ae2d26797c2ffa3B4f6612Bdc4aDf22b7156",
+    proxy: "0x2f4b9b63C869076c9dBE89626e340Fc7741fcE59",
     decimals: 18,
   } satisfies NativeTokenEntry,
 
-  wflow: {
-    variant: "erc20",
-    proxy: "0x00129E94d5340bd19d0b4ed9CDf718BB6e0A9400",
-    underlying: "0xe7BbEAcC04A589e4B70922b2796Bb4F8e6e4873C", // WFLOW9
-    decimals: 18,
-  } satisfies ERC20TokenEntry,
-
   mockusdc: {
     variant: "erc20",
-    proxy: "0xd45FDa099Cf67eD842eA379865AB08E18D62BAf3",
-    underlying: "0x8405E8831737aE72204c271581b7d4fAD9f622bE", // MockUSDC
+    proxy: "0x4689a36427115a6023BEb8c8b3c38E6fDF5Ae84F",
+    underlying: "0x686E8d90A7B608540cAF46E527fD8a5631A1b658", // MockUSDC v0.6.6
     decimals: 6,
   } satisfies ERC20TokenEntry,
 
