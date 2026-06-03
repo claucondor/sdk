@@ -263,7 +263,7 @@ import FungibleToken from 0x9a0766d93b6608b7
 
 access(all) fun main(addr: Address): UFix64 {
   let acct = getAccount(addr)
-  let cap = acct.capabilities.borrow<&{FungibleToken.Balance}>(/public/${this.entry.ftContractName}Balance)
+  let cap = acct.capabilities.borrow<&{FungibleToken.Balance}>(${this.entry.ftContractName}.BalancePublicPath)
     ?? panic("No balance capability")
   return cap.balance
 }

@@ -79,3 +79,9 @@ export { deriveBabyJubKeypairFromBytes } from "./derive-keypair";
 // shielded transfer should attach so recipients can decrypt + unwrap).
 export { encryptShieldedNote, decryptShieldedNote } from "./shielded-note";
 export type { ShieldedNote } from "./shielded-note";
+
+// Snapshot + Note schema (wrap/transfer/unwrap encrypted blobs)
+// These are the canonical encode/decode functions for on-chain blobs.
+export { encryptSnapshot, decryptSnapshot } from "./snapshot-schema";
+export { encryptNote, decryptNote } from "./note-schema";
+export type { SnapshotContent, NoteContent } from "../types";
