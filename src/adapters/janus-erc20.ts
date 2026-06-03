@@ -194,6 +194,113 @@ export class JanusERC20Adapter implements JanusTokenAdapter {
     return { txHash: receipt.hash, netAmount: orch.netAmount, fee: orch.fee };
   }
 
+  /**
+   * wrapViaCoa — Flow-Wallet / FCL path.
+   *
+   * Dispatches a Cadence transaction signed by the user's Flow Wallet.
+   * The user's COA (at /storage/evm) is msg.sender for both the ERC20
+   * approve() and JanusERC20.wrap() calls, matching the COA address that
+   * has the MemoKey registered via smartSetupAccount().
+   *
+   * Use this method in browser contexts where FCL is available. The original
+   * wrap() is kept for non-FCL consumers (CLI, scripts, demos).
+   *
+   * @param params.coaEvmAddr  User's COA EVM hex address (0x…, 42 chars).
+   *                            Used to look up their MemoKey from the registry.
+   */
+  async wrapViaCoa(
+    params: WrapParams & { coaEvmAddr: string }
+  ): Promise<WrapResult> {
+    // Dynamic FCL import — only available in browser/FCL environments.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fcl: any = await import("@onflow/fcl");
+
+    const bps = await this.feeBps();
+
+    // Look up the MemoKey registered under the user's COA address.
+    const memoKey = await this.getMemoKey(params.coaEvmAddr);
+    if (!memoKey) {
+      throw new Error(
+        `JanusERC20Adapter.wrapViaCoa: COA ${params.coaEvmAddr} has no registered memoKey. Run smartSetupAccount first.`
+      );
+    }
+
+    // Orchestrate proof + snapshot encryption (same as EVMSigner path).
+    const orch = await orchestrateWrap({
+      grossAmount: params.grossAmount,
+      feeBps: bps,
+      senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
+    });
+
+    // ABI-encode approve(proxy, grossAmount) for the underlying ERC20.
+    const approveIface = new ethers.Interface(ERC20_APPROVE_ABI);
+    const approveCalldata = approveIface.encodeFunctionData("approve", [
+      this.address,
+      params.grossAmount,
+    ]).slice(2); // strip 0x
+
+    // ABI-encode JanusERC20.wrap(amount, txCommit[2], proof[8], snapshot, ephX, ephY)
+    const wrapIface = new ethers.Interface(ERC20_JANUS_ABI);
+    const wrapCalldata = wrapIface.encodeFunctionData("wrap", [
+      params.grossAmount,
+      [orch.txCommit[0], orch.txCommit[1]],
+      [...orch.amountProof],
+      ethers.hexlify(orch.encryptedSnapshot),
+      orch.ephPubkeyX,
+      orch.ephPubkeyY,
+    ]).slice(2); // strip 0x
+
+    // Cadence tx: COA calls approve then wrap in a single atomic transaction.
+    const cadenceTx = `
+import EVM from 0x8c5303eaa26202d6
+
+transaction(approveCalldata: String, wrapCalldata: String, underlyingHex: String, proxyHex: String) {
+  prepare(signer: auth(BorrowValue, Storage) &Account) {
+    let coa = signer.storage.borrow<auth(EVM.Call, EVM.Owner) &EVM.CadenceOwnedAccount>(
+      from: /storage/evm
+    ) ?? panic("No COA at /storage/evm — run smartSetupAccount first")
+
+    // 1. Approve proxy to spend underlying ERC20.
+    let approveResult = coa.call(
+      to: EVM.addressFromString(underlyingHex),
+      data: approveCalldata.decodeHex(),
+      gasLimit: 100000,
+      value: EVM.Balance(attoflow: 0)
+    )
+    assert(approveResult.status == EVM.Status.successful,
+      message: "ERC20.approve reverted — errorCode: ".concat(approveResult.errorCode.toString()).concat(" ").concat(approveResult.errorMessage))
+
+    // 2. Call JanusERC20.wrap.
+    let wrapResult = coa.call(
+      to: EVM.addressFromString(proxyHex),
+      data: wrapCalldata.decodeHex(),
+      gasLimit: 800000,
+      value: EVM.Balance(attoflow: 0)
+    )
+    assert(wrapResult.status == EVM.Status.successful,
+      message: "JanusERC20.wrap reverted — errorCode: ".concat(wrapResult.errorCode.toString()).concat(" ").concat(wrapResult.errorMessage))
+  }
+}
+`;
+
+    const txId: string = await fcl.mutate({
+      cadence: cadenceTx,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      args: (arg: any, t: any) => [
+        arg(approveCalldata, t.String),
+        arg(wrapCalldata, t.String),
+        arg(this.underlyingAddress, t.String),
+        arg(this.address, t.String),
+      ],
+      proposer: fcl.authz,
+      payer: fcl.authz,
+      authorizations: [fcl.authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txHash: txId, netAmount: orch.netAmount, fee: orch.fee };
+  }
+
   async shieldedTransfer(params: SendParams, signer: EVMSigner): Promise<SendResult> {
     const signerAddr = await signer.getAddress();
     const [senderMemoKey, recipientMemoKey] = await Promise.all([

@@ -195,6 +195,117 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
     return { txHash: receipt.hash, netAmount: orch.netAmount, fee: orch.fee };
   }
 
+  /**
+   * wrapViaCoa — Flow-Wallet / FCL path.
+   *
+   * Dispatches a Cadence transaction signed by the user's Flow Wallet.
+   * The user's COA (at /storage/evm) is the msg.sender JanusFlow sees,
+   * so the MemoKey registered by smartSetupAccount() is found correctly.
+   *
+   * Use this method in browser contexts where FCL is available and the
+   * user authenticates via Flow Wallet. The original wrap() is kept for
+   * non-FCL consumers (CLI, scripts, automation, demos).
+   *
+   * @param params.grossAmount   Gross FLOW in wei (18 decimals).
+   * @param params.coaEvmAddr   User's COA EVM hex address (0x…, 42 chars).
+   *                             Used to look up their MemoKey from the registry.
+   */
+  async wrapViaCoa(
+    params: WrapParams & { coaEvmAddr: string }
+  ): Promise<WrapResult> {
+    // Dynamic FCL import — only available in browser/FCL environments.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fcl: any = await import("@onflow/fcl");
+
+    const bps = await this.feeBps();
+
+    // Look up the MemoKey registered under the user's COA address.
+    const memoKey = await this.getMemoKey(params.coaEvmAddr);
+    if (!memoKey) {
+      throw new Error(
+        `JanusFlowAdapter.wrapViaCoa: COA ${params.coaEvmAddr} has no registered memoKey. Run smartSetupAccount first.`
+      );
+    }
+
+    // Orchestrate proof + snapshot encryption (same as EVMSigner path).
+    const orch = await orchestrateWrap({
+      grossAmount: params.grossAmount,
+      feeBps: bps,
+      senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
+    });
+
+    // ABI-encode the JanusFlow.wrap call as calldata.
+    // Signature: wrap(uint256[2],uint256[8],bytes,uint256,uint256)
+    const iface = new ethers.Interface(NATIVE_ABI);
+    const calldata = iface.encodeFunctionData("wrap", [
+      [orch.txCommit[0], orch.txCommit[1]],
+      [...orch.amountProof],
+      ethers.hexlify(orch.encryptedSnapshot),
+      orch.ephPubkeyX,
+      orch.ephPubkeyY,
+    ]);
+    // Strip "0x" for Cadence String arg.
+    const calldataHex = calldata.slice(2);
+
+    // grossAmount in attoflow (1 FLOW = 10^18 attoflow = 10^10 * 10^8 UFix64 units).
+    // UFix64 format: grossAmount / 10^10 (since UFix64 scale = 10^8 and 10^8 * 10^10 = 10^18)
+    const attoflowBig = params.grossAmount;
+    // UFix64 = attoflow / 10^10, expressed as "N.XXXXXXXX"
+    const ufixScale = 10_000_000_000n; // 10^10
+    const whole = attoflowBig / ufixScale;
+    const frac = attoflowBig % ufixScale;
+    const amountUFix64 = `${whole}.${frac.toString().padStart(10, "0").slice(0, 8)}`;
+
+    // Cadence tx: withdraw FLOW from vault → deposit into COA → coa.call JanusFlow.wrap
+    const cadenceTx = `
+import FungibleToken from 0x9a0766d93b6608b7
+import FlowToken from 0x7e60df042a9c0868
+import EVM from 0x8c5303eaa26202d6
+
+transaction(amountUFix64: UFix64, calldataHex: String, proxyHex: String, attoflowWei: UInt) {
+  prepare(signer: auth(BorrowValue, Storage) &Account) {
+    let coa = signer.storage.borrow<auth(EVM.Call, EVM.Owner) &EVM.CadenceOwnedAccount>(
+      from: /storage/evm
+    ) ?? panic("No COA at /storage/evm — run smartSetupAccount first")
+
+    // Withdraw FLOW from Cadence vault and deposit into COA EVM balance.
+    let flowVault = signer.storage.borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(
+      from: /storage/flowTokenVault
+    ) ?? panic("No FlowToken vault at /storage/flowTokenVault")
+    let payment <- flowVault.withdraw(amount: amountUFix64) as! @FlowToken.Vault
+    coa.deposit(from: <-payment)
+
+    // Call JanusFlow.wrap with msg.value = grossAmount in attoflow.
+    let result = coa.call(
+      to: EVM.addressFromString(proxyHex),
+      data: calldataHex.decodeHex(),
+      gasLimit: 800000,
+      value: EVM.Balance(attoflow: attoflowWei)
+    )
+    assert(result.status == EVM.Status.successful,
+      message: "JanusFlow.wrap reverted — errorCode: ".concat(result.errorCode.toString()).concat(" ").concat(result.errorMessage))
+  }
+}
+`;
+
+    const txId: string = await fcl.mutate({
+      cadence: cadenceTx,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      args: (arg: any, t: any) => [
+        arg(amountUFix64, t.UFix64),
+        arg(calldataHex, t.String),
+        arg(this.address, t.String),
+        arg(attoflowBig.toString(), t.UInt),
+      ],
+      proposer: fcl.authz,
+      payer: fcl.authz,
+      authorizations: [fcl.authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txHash: txId, netAmount: orch.netAmount, fee: orch.fee };
+  }
+
   async shieldedTransfer(params: SendParams, signer: EVMSigner): Promise<SendResult> {
     const signerAddr = await signer.getAddress();
     const [senderMemoKey, recipientMemoKey] = await Promise.all([
