@@ -37,7 +37,12 @@ import type {
 import type { Point } from "../types/commitment";
 import type { ProofUint256 } from "../types/proof";
 import type { CadenceFTTokenEntry } from "../types";
-import { FLOW_CADENCE_ACCESS, UFIX64_SCALE } from "../network/contracts";
+import { ethers } from "ethers";
+import { FLOW_CADENCE_ACCESS, FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS, UFIX64_SCALE } from "../network/contracts";
+
+const FT_MEMO_REGISTRY_ABI = [
+  "function getMemoKey(address) view returns (uint256 x, uint256 y, uint256 publishedAt)",
+];
 import { orchestrateWrap, orchestrateWrapWithPrebuiltProof } from "../orchestration/wrap";
 import { orchestrateShieldedTransfer, orchestrateShieldedTransferWithPrebuiltProof } from "../orchestration/shielded-transfer";
 import { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "../orchestration/unwrap";
@@ -74,15 +79,28 @@ transaction(
   let senderAddress: Address
   let coa: auth(EVM.Call) &EVM.CadenceOwnedAccount
 
-  prepare(signer: auth(BorrowValue) &Account) {
+  prepare(signer: auth(BorrowValue, SaveValue, IssueStorageCapabilityController, PublishCapability) &Account) {
     self.senderAddress = signer.address
+
+    // Idempotent CommitmentRegistry setup — first-time MockFT users get
+    // it auto-installed; existing users skip cleanly.
+    if signer.storage.borrow<&JanusFT.CommitmentRegistry>(
+      from: JanusFT.CommitmentRegistryStoragePath
+    ) == nil {
+      let emptyVault <- ${ftContractName}.createEmptyVault(
+        vaultType: Type<@${ftContractName}.Vault>()
+      )
+      let registry <- JanusFT.createRegistry(vault: <-emptyVault)
+      signer.storage.save(<-registry, to: JanusFT.CommitmentRegistryStoragePath)
+    }
+
     let userVault = signer.storage.borrow<auth(FungibleToken.Withdraw) &${ftContractName}.Vault>(
       from: ${ftContractName}.VaultStoragePath
     ) ?? panic("wrap_ft: signer has no ${ftContractName} vault")
     self.depositVault <- userVault.withdraw(amount: grossAmount)
     self.registryRef = signer.storage.borrow<&JanusFT.CommitmentRegistry>(
       from: JanusFT.CommitmentRegistryStoragePath
-    ) ?? panic("wrap_ft: signer must hold the JanusFT registry")
+    ) ?? panic("wrap_ft: registry borrow failed after idempotent setup")
     self.coa = signer.storage.borrow<auth(EVM.Call) &EVM.CadenceOwnedAccount>(
       from: /storage/evm
     ) ?? panic("wrap_ft: no COA at /storage/evm")
@@ -271,13 +289,22 @@ export class JanusFTAdapter implements JanusTokenAdapter {
 
   private readonly entry: CadenceFTTokenEntry;
   private readonly accessApiUrl: string;
+  private readonly provider: ethers.JsonRpcProvider;
+  readonly memoRegistryAddress: string;
 
-  constructor(id: string, entry: CadenceFTTokenEntry, accessApiUrl = FLOW_CADENCE_ACCESS) {
+  constructor(id: string, entry: CadenceFTTokenEntry, accessApiUrl = FLOW_CADENCE_ACCESS, rpcUrl = FLOW_EVM_RPC) {
     this.id = id;
     this.entry = entry;
     this.address = entry.cadenceAddress;
     this.decimals = entry.decimals;
     this.accessApiUrl = accessApiUrl;
+    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    this.memoRegistryAddress = MEMO_REGISTRY_ADDRESS;
+  }
+
+  /** Read-only handle on the shared EVM MemoKeyRegistry. */
+  private _memoRegistry(): ethers.Contract {
+    return new ethers.Contract(this.memoRegistryAddress, FT_MEMO_REGISTRY_ABI, this.provider);
   }
 
   private async _fcl() {
@@ -343,26 +370,14 @@ access(all) fun main(addr: Address): {String: UInt256} {
    * Returns null if no MemoKey resource is published at /public/openjanusMemoKey.
    */
   async getMemoKey(addr: string): Promise<{ x: bigint; y: bigint } | null> {
-    const fcl = await this._fcl();
-    const script = `
-import JanusFlow from 0x5dcbeb41055ec57e
-
-access(all) fun main(addr: Address): {String: UInt256}? {
-  return JanusFlow.getMemoPubkey(owner: addr)
-}
-`;
+    // v0.6.6: reads from the shared EVM MemoKeyRegistry. `addr` is the COA's
+    // EVM hex address — same registry consumed by JanusFlow / JanusERC20 adapters.
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result: any = await fcl.query({
-        cadence: script,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        args: (arg: any, types: any) => [arg(addr, types.Address)],
-      });
-      if (result === null || result === undefined) return null;
-      const x = BigInt(result.x ?? 0);
-      const y = BigInt(result.y ?? 0);
-      if (x === 0n && y === 0n) return null;
-      return { x, y };
+      const [x, y] = await this._memoRegistry().getMemoKey(addr);
+      const xb = BigInt(x);
+      const yb = BigInt(y);
+      if (xb === 0n && yb === 0n) return null;
+      return { x: xb, y: yb };
     } catch {
       return null;
     }

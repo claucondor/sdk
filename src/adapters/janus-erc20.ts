@@ -457,7 +457,10 @@ transaction(calldataHex: String, proxyHex: String) {
       value: EVM.Balance(attoflow: 0)
     )
     assert(result.status == EVM.Status.successful,
-      message: "JanusERC20.shieldedTransfer reverted — errorCode: ".concat(result.errorCode.toString()).concat(" ").concat(result.errorMessage))
+      message: "JanusERC20.shieldedTransfer reverted — errorCode: "
+        .concat(result.errorCode.toString())
+        .concat(" msg: ").concat(result.errorMessage)
+        .concat(" data: 0x").concat(String.encodeHex(result.data)))
   }
 }
 `;
