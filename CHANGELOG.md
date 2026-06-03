@@ -2,6 +2,14 @@
 
 ---
 
+## 0.6.6 — 2026-06-03
+
+**JanusFTAdapter.getBalance: use contract canonical BalancePublicPath instead of hardcoded path.**
+
+- `src/adapters/janus-ft.ts` line 266: was `/public/${ftContractName}Balance` (PascalCase, breaks MockFT whose path is `/public/mockFTBalance`). Now reads `${ftContractName}.BalancePublicPath` — same pattern as `VaultStoragePath` (wrap) and `ReceiverPublicPath` (unwrap). Works for any FT contract regardless of casing convention.
+
+---
+
 ## 0.6.5 — 2026-06-02
 
 README cleanup — `(JanusMockFT)` label corrected to `(JanusFT)` in the Token IDs table.
