@@ -40,7 +40,11 @@ export const TOKEN_REGISTRY = {
   mockft: {
     variant: "cadence-ft",
     cadenceAddress: "0x7599043aea001283",
-    contractName: "JanusMockFT",
+    // contractName changed from 'JanusMockFT' → 'JanusFT' (Track B+++).
+    // The registry key stays 'mockft' — it identifies the JanusFT instance
+    // that wraps MockFT (the testnet-only underlying). 'mockft' is a stable
+    // token-registry id, not a contract name. Only the contractName changes.
+    contractName: "JanusFT",
     ftAddress: "0x7599043aea001283",
     ftContractName: "MockFT",
     decimals: 8, // UFix64 internal: 1.0 = 100_000_000

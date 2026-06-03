@@ -2,6 +2,29 @@
 
 ---
 
+## 0.6.4 — 2026-06-03
+
+**JanusFT: Cadence wrapper renamed from JanusMockFT to JanusFT for production-grade naming.**
+
+### Architecture change (Track B+++)
+
+- `JanusFT` is now the canonical Cadence FT wrapper (generic underlying — accepts any `@{FungibleToken.Vault}` at deploy time). `MockFT` remains as the testnet-only underlying; its name is fine (Mock prefix on underlying, not wrapper).
+- Upgraded from lab-spike stub (babyAddStub, no real ZK) to full production contract: real cross-VM BabyJub arithmetic via `BabyJub.sol`, real Groth16 ZK verification via `ConfidentialTransferVerifier.sol` + `AmountDiscloseVerifier.sol`.
+- `FeeConfig` resource added (upgrade-safe: no new contract-level fields). Includes `feeReceiverPath` for generic underlying FT receiver capability.
+- `custodyVaultType()` view function derives the `Type` from the stored `underlyingVaultTypeIdentifier` string via `CompositeType()`.
+- Deployed on testnet at `0x7599043aea001283`:
+  - update_tx: `c090b6ab36333a0238da3d7b5fc1b5931ca6862d3945779f7abf51947901d768`
+  - setup_tx:  `50e3434e72d9e511c24c831fcebd2f3a451357f18b6e27c8255d5ce2b08af3ff`
+
+### SDK changes
+
+- `src/network/contracts.ts`: `mockft` token registry entry `contractName` changed from `'JanusMockFT'` to `'JanusFT'`. Registry key `'mockft'` is stable.
+- `src/adapters/janus-ft.ts`: All Cadence transaction templates updated to import `JanusFT` instead of `JanusMockFT`. Wrap/unwrap templates now accept the underlying FT contract name + address as parameters (forward-compatible for non-MockFT underlyings). `shieldedTransfer` template updated to match JanusFT's 9-parameter signature.
+- `src/scan/cadence-scanner.ts`: doc comment updated.
+- `tests/unit/cadence-scanner.test.ts`: all `JanusMockFT` → `JanusFT` event type strings updated.
+- New Cadence transactions (in cadence-crypto-lab):
+  - `wrap_ft.cdc`, `shielded_transfer_ft.cdc`, `unwrap_ft.cdc`, `setup_janus_ft_registry.cdc`, `publish_memokey_ft.cdc`
+
 ## 0.6.3 — 2026-06-02
 
 **MemoKeyRegistry unification — single publishMemoKey covers all Janus tokens.**

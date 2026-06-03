@@ -1,8 +1,10 @@
 # @claucondor/sdk
 
-Multi-token privacy SDK for Flow. Version: **v0.6.3**.
+Multi-token privacy SDK for Flow. Version: **v0.6.4**.
 
-Send FLOW, WFLOW, MockUSDC, or MockFT shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
+Send FLOW, WFLOW, MockUSDC, or MockFT (via JanusFT generic Cadence wrapper) shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
+
+**v0.6.4**: `JanusFT` generic Cadence wrapper — replaces `JanusMockFT` with a production-grade, underlying-agnostic wrapper. Real cross-VM BabyJub + Groth16 ZK (no stubs). MockFT stays as the testnet underlying.
 
 ## Install
 

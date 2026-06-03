@@ -1,11 +1,11 @@
 /**
- * scan/cadence-scanner.ts — Cadence event scanner for JanusMockFT.
+ * scan/cadence-scanner.ts — Cadence event scanner for JanusFT.
  *
  * Uses Flow REST API to query Cadence events. Flow testnet caps event range
  * at 250 blocks per request, so this paginates aggressively.
  *
- * Actual event field names emitted by JanusMockFT v0.6 (verified against
- * deployed contract at 0x7599043aea001283 + live events from the lab E2E run):
+ * Actual event field names emitted by JanusFT v0.6 (same schema as JanusMockFT v0.6,
+ * deployed contract at 0x7599043aea001283):
  *
  *   - WrapWithSnapshot(account: Address, commitX, commitY,
  *       encryptedSnapshot, ephPubX, ephPubY)
