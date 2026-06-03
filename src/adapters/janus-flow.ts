@@ -314,14 +314,16 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
     // Strip "0x" for Cadence String arg.
     const calldataHex = calldata.slice(2);
 
-    // grossAmount in attoflow (1 FLOW = 10^18 attoflow = 10^10 * 10^8 UFix64 units).
-    // UFix64 format: grossAmount / 10^10 (since UFix64 scale = 10^8 and 10^8 * 10^10 = 10^18)
+    // grossAmount in attoflow (1 FLOW = 10^18 attoflow). UFix64 string is "N.XXXXXXXX"
+    // where N = whole FLOW count and XXXXXXXX is the 8-decimal fraction.
+    // attoflow / 10^18 → whole FLOW; (attoflow % 10^18) / 10^10 → 8-decimal fraction.
     const attoflowBig = params.grossAmount;
-    // UFix64 = attoflow / 10^10, expressed as "N.XXXXXXXX"
-    const ufixScale = 10_000_000_000n; // 10^10
-    const whole = attoflowBig / ufixScale;
-    const frac = attoflowBig % ufixScale;
-    const amountUFix64 = `${whole}.${frac.toString().padStart(10, "0").slice(0, 8)}`;
+    const flowScale = 1_000_000_000_000_000_000n; // 10^18 attoflow per FLOW
+    const ufixFracScale = 10_000_000_000n;         // 10^10 attoflow per UFix64 fractional unit
+    const whole = attoflowBig / flowScale;
+    const fracAttoflow = attoflowBig % flowScale;
+    const fracUfix64 = fracAttoflow / ufixFracScale;
+    const amountUFix64 = `${whole}.${fracUfix64.toString().padStart(8, "0")}`;
 
     // Cadence tx: withdraw FLOW from vault → deposit into COA → coa.call JanusFlow.wrap
     const cadenceTx = `
