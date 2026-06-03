@@ -2,6 +2,15 @@
 
 ---
 
+## 0.6.5 — 2026-06-02
+
+README cleanup — `(JanusMockFT)` label corrected to `(JanusFT)` in the Token IDs table.
+No functional code change. Use 0.6.5 instead of 0.6.4 for a clean README.
+
+- `README.md` Token IDs table row for `mockft`: `(JanusMockFT)` → `(JanusFT)`
+
+---
+
 ## 0.6.4 — 2026-06-03
 
 **JanusFT: Cadence wrapper renamed from JanusMockFT to JanusFT for production-grade naming.**

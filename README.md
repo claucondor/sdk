@@ -1,10 +1,10 @@
 # @claucondor/sdk
 
-Multi-token privacy SDK for Flow. Version: **v0.6.4**.
+Multi-token privacy SDK for Flow. Version: **v0.6.5**.
 
 Send FLOW, WFLOW, MockUSDC, or MockFT (via JanusFT generic Cadence wrapper) shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
 
-**v0.6.4**: `JanusFT` generic Cadence wrapper — replaces `JanusMockFT` with a production-grade, underlying-agnostic wrapper. Real cross-VM BabyJub + Groth16 ZK (no stubs). MockFT stays as the testnet underlying.
+**v0.6.4**: `JanusFT` generic Cadence wrapper — production-grade, underlying-agnostic. Real cross-VM BabyJub + Groth16 ZK (no stubs). MockFT is the testnet underlying.
 
 ## Install
 
@@ -66,7 +66,7 @@ await flow.unwrap({
 | `flow` | native | `0x2458ae2d26797c2ffa3B4f6612Bdc4aDf22b7156` |
 | `wflow` | erc20 | `0x00129E94d5340bd19d0b4ed9CDf718BB6e0A9400` |
 | `mockusdc` | erc20 | `0xd45FDa099Cf67eD842eA379865AB08E18D62BAf3` |
-| `mockft` | cadence-ft | `0x7599043aea001283` (JanusMockFT) |
+| `mockft` | cadence-ft | `0x7599043aea001283` (JanusFT) |
 
 All at feeBps=10 (0.1%).
 
