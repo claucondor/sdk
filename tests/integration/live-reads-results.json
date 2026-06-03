@@ -1,5 +1,5 @@
 {
-  "startedAt": "2026-06-02T15:07:06.587Z",
+  "startedAt": "2026-06-03T00:24:32.777Z",
   "tests": [
     {
       "name": "flow: feeBps in [0,100]",
@@ -39,7 +39,7 @@
     {
       "name": "flow: getMemoKey(alice COA) returns null or valid {x,y}",
       "status": "PASS",
-      "evidence": "(x=10256193356452821037..., y=21806945034125235971...)"
+      "evidence": "null (not registered)"
     },
     {
       "name": "wflow: feeBps in [0,100]",
@@ -79,7 +79,7 @@
     {
       "name": "wflow: getMemoKey(alice COA) returns null or valid {x,y}",
       "status": "PASS",
-      "evidence": "(x=59760167380015113512..., y=13972584454418485303...)"
+      "evidence": "null (not registered)"
     },
     {
       "name": "mockusdc: feeBps in [0,100]",
@@ -119,7 +119,7 @@
     {
       "name": "mockusdc: getMemoKey(alice COA) returns null or valid {x,y}",
       "status": "PASS",
-      "evidence": "(x=59760167380015113512..., y=13972584454418485303...)"
+      "evidence": "null (not registered)"
     },
     {
       "name": "mockft: feeBps in [0,100]",
@@ -134,7 +134,7 @@
     {
       "name": "mockft: getCommitment(alice) doesn't throw",
       "status": "PASS",
-      "evidence": "(x=17973554177780852872..., y=66739096072732042393...)"
+      "evidence": "(x=16671388368743672865..., y=17364445739183352376...)"
     },
     {
       "name": "mockft: getMemoKey(alice) returns null or valid",
@@ -144,7 +144,7 @@
     {
       "name": "getLatestSealedHeight reaches mainnet REST API",
       "status": "PASS",
-      "evidence": "height=324844518"
+      "evidence": "height=324911377"
     },
     {
       "name": "scanCadenceSnapshots(alice, mockft) over last 200 blocks doesn't throw",
@@ -152,7 +152,7 @@
       "evidence": "events_found=0"
     }
   ],
-  "finishedAt": "2026-06-02T15:07:43.400Z",
+  "finishedAt": "2026-06-03T00:24:45.069Z",
   "summary": {
     "passed": 30,
     "failed": 0,

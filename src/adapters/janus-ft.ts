@@ -416,7 +416,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
         arg(orch.txCommit[0].toString(), types.UInt256),
         arg(orch.txCommit[1].toString(), types.UInt256),
         arg(orch.amountProof.map((v) => v.toString()), types.Array(types.UInt256)),
-        arg([] as string[], types.Array(types.UInt256)), // publicInputs
+        arg(orch.amountPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
         arg(orch.ephPubkeyX.toString(), types.UInt256),
         arg(orch.ephPubkeyY.toString(), types.UInt256),
@@ -492,7 +492,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
         arg(orch.txCommit[0].toString(), types.UInt256),
         arg(orch.txCommit[1].toString(), types.UInt256),
         arg(orch.amountProof.map((v) => v.toString()), types.Array(types.UInt256)),
-        arg([] as string[], types.Array(types.UInt256)), // amountPublicInputs
+        arg(orch.amountPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(orch.transferPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(orch.transferProof.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),

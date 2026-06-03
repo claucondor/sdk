@@ -35,6 +35,8 @@ export interface UnwrapOrchestrateResult {
   fee: bigint;
   txCommit: readonly [bigint, bigint];
   amountProof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
+  /** Amount-disclose public inputs [claimed_amount, Cx, Cy] — pass to JanusFT.unwrap(). */
+  amountPublicInputs: readonly [bigint, bigint, bigint];
   transferPublicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
   transferProof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
   encryptedSnapshot: Uint8Array;
@@ -99,6 +101,7 @@ export async function orchestrateUnwrap(
     fee,
     txCommit: amountProofResult.txCommit,
     amountProof: amountProofResult.proof,
+    amountPublicInputs: amountProofResult.publicInputs,
     transferPublicInputs: transferProofResult.publicInputs,
     transferProof: transferProofResult.proof,
     encryptedSnapshot: snapshotEnc.ciphertext,

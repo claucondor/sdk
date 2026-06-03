@@ -36,14 +36,14 @@ const ACTORS = {
   dave:    { evm: "0x0000000000000000000000027b94cfc8a64971cd", cadence: "0xd32d9100e1fe983b" },
 };
 
-// Lab E2E tx hashes that proved JanusMockFT end-to-end on June 2
+// Lab E2E tx hashes that proved JanusFT end-to-end on June 3 (Track B+++)
 const LAB_TXS = {
-  alice_wrap:                     "28938a6a6b0b414931a1d64793a8db6e9577983f18b0724156bef86ac6e3a36a",
-  alice_to_bob_shielded_transfer: "be7e844da729aad71f915942e73cd836f59c999a7f19b760f731b1e76fabca39",
-  bob_unwrap:                     "2da25ee81d094cdfd8a9b6efe3907c28c3f0b6ffc02b14b50b4079b3ce3450a2",
-  charlie_wrap:                   "e6f1ab4d1754da75ad687ae3ed5edb38e2af62dfc3c7e160a7a17ec0d3bfbb25",
-  charlie_to_dave_shielded_transfer: "a43b147c2833e75a820114b542443d34bd8c690c21fd4195e9a84b9d9d0773c9",
-  dave_unwrap:                    "549953dd51fa270bd0d54645fdac37258284495e1f06919df605caa00a792333",
+  alice_wrap:                     "ced969a8e0e897b6abfd67a5b0deae08d508a7c63317c8f90f50915a30fdd00a",
+  alice_to_bob_shielded_transfer: "6eeecd7edb85a6ba0a1b49240e5b6e77b12b9e7fc90f3260f2dae615d062ed3b",
+  bob_unwrap:                     "3a9718b63f44f7dbc619077440e02f78d43b6cce6d7c0478de5ecc904b1dd8ca",
+  charlie_wrap:                   "955bec5491cc140405a4526dc18265dbcef9d0a3dfd1638839d74d6f84586fa4",
+  charlie_to_dave_shielded_transfer: "20502fa0e260bc472252c1de15d95e4ac39f79c4b89d41720ef2916c55a2007a",
+  dave_unwrap:                    "95c454918041e43973f49868dd7429691e6963c9d3167bef2eeb8c38ba61b5a5",
 };
 
 const REST = "https://rest-testnet.onflow.org";
@@ -95,7 +95,7 @@ await test("scan Alice's WrapWithSnapshot from lab", async () => {
   const events = await scanCadenceSnapshots(
     ACTORS.alice.cadence,
     "0x7599043aea001283",
-    "JanusMockFT",
+    "JanusFT",
     { fromBlock: blocks.alice_wrap, toBlock: blocks.alice_wrap }
   );
   if (events.length === 0) throw new Error("no events");
@@ -109,7 +109,7 @@ await test("scan Alice's ShieldedTransferWithSnapshot (sender) from lab", async 
   const events = await scanCadenceSnapshots(
     ACTORS.alice.cadence,
     "0x7599043aea001283",
-    "JanusMockFT",
+    "JanusFT",
     { fromBlock: blocks.alice_to_bob_shielded_transfer, toBlock: blocks.alice_to_bob_shielded_transfer }
   );
   const transfers = events.filter(e => e.eventType === "shieldedTransfer");
@@ -121,7 +121,7 @@ await test("scan Bob's incoming note (recipient) from lab", async () => {
   const notes = await scanCadenceIncomingNotes(
     ACTORS.bob.cadence,
     "0x7599043aea001283",
-    "JanusMockFT",
+    "JanusFT",
     { fromBlock: blocks.alice_to_bob_shielded_transfer, toBlock: blocks.alice_to_bob_shielded_transfer }
   );
   if (notes.length === 0) throw new Error("no incoming notes");
@@ -132,7 +132,7 @@ await test("scan Bob's UnwrapWithSnapshot from lab", async () => {
   const events = await scanCadenceSnapshots(
     ACTORS.bob.cadence,
     "0x7599043aea001283",
-    "JanusMockFT",
+    "JanusFT",
     { fromBlock: blocks.bob_unwrap, toBlock: blocks.bob_unwrap }
   );
   const unwraps = events.filter(e => e.eventType === "unwrap");
@@ -144,7 +144,7 @@ await test("scan Charlie→Dave transfer chain from lab", async () => {
   const daveNotes = await scanCadenceIncomingNotes(
     ACTORS.dave.cadence,
     "0x7599043aea001283",
-    "JanusMockFT",
+    "JanusFT",
     { fromBlock: blocks.charlie_to_dave_shielded_transfer, toBlock: blocks.charlie_to_dave_shielded_transfer }
   );
   if (daveNotes.length === 0) throw new Error("no Dave note");
@@ -155,7 +155,7 @@ await test("scanner filters correctly: Alice's wrap NOT seen as Bob's", async ()
   const events = await scanCadenceSnapshots(
     ACTORS.bob.cadence,
     "0x7599043aea001283",
-    "JanusMockFT",
+    "JanusFT",
     { fromBlock: blocks.alice_wrap, toBlock: blocks.alice_wrap }
   );
   if (events.length !== 0) throw new Error(`expected 0, got ${events.length}`);
