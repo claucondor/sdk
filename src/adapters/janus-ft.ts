@@ -35,11 +35,12 @@ import type {
   SnapshotContent,
 } from "../types";
 import type { Point } from "../types/commitment";
+import type { ProofUint256 } from "../types/proof";
 import type { CadenceFTTokenEntry } from "../types";
 import { FLOW_CADENCE_ACCESS, UFIX64_SCALE } from "../network/contracts";
-import { orchestrateWrap } from "../orchestration/wrap";
-import { orchestrateShieldedTransfer } from "../orchestration/shielded-transfer";
-import { orchestrateUnwrap } from "../orchestration/unwrap";
+import { orchestrateWrap, orchestrateWrapWithPrebuiltProof } from "../orchestration/wrap";
+import { orchestrateShieldedTransfer, orchestrateShieldedTransferWithPrebuiltProof } from "../orchestration/shielded-transfer";
+import { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "../orchestration/unwrap";
 import { decryptSnapshot } from "../crypto/snapshot-schema";
 import { decryptNote } from "../crypto/note-schema";
 import {
@@ -220,6 +221,41 @@ transaction(pubkeyX: UInt256, pubkeyY: UInt256) {
 `;
 }
 
+/**
+ * Pre-built AmountDisclose proof for wrapViaCoa (browser callers).
+ * POST to /api/proof/wrap server-side, then pass the result here.
+ */
+export interface FTWrapViaCoaPrebuiltProof {
+  proof: ProofUint256;
+  txCommit: readonly [bigint, bigint];
+  blinding: bigint;
+  publicInputs: readonly [bigint, bigint, bigint];
+}
+
+/**
+ * Pre-built ConfidentialTransfer proof for shieldedTransferViaCoa (browser callers).
+ * POST to /api/proof/shielded-transfer, pass the result here.
+ */
+export interface FTShieldedTransferViaCoaPrebuiltProof {
+  proof: ProofUint256;
+  publicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
+  transferBlinding: bigint;
+  newBlinding: bigint;
+}
+
+/**
+ * Pre-built proofs for unwrapViaCoa (browser callers).
+ * POST to /api/proof/unwrap, pass the result here.
+ */
+export interface FTUnwrapViaCoaPrebuiltProofs {
+  amountProof: ProofUint256;
+  txCommit: readonly [bigint, bigint];
+  amountPublicInputs: readonly [bigint, bigint, bigint];
+  transferProof: ProofUint256;
+  transferPublicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
+  newBlinding: bigint;
+}
+
 /** Convert bigint raw amount (10^8 units) to UFix64 string "N.XXXXXXXX" */
 function rawToUFix64(raw: bigint): string {
   const whole = raw / UFIX64_SCALE;
@@ -382,6 +418,205 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
     });
     await fcl.tx(txId).onceSealed();
     return { txHash: txId };
+  }
+
+  /**
+   * wrapViaCoa — browser-safe wrap for Cadence FT.
+   *
+   * Takes a pre-built proof (from POST /api/proof/wrap — Node.js) and the
+   * user's Cadence address + COA address. Dispatches a Cadence transaction
+   * via FCL so the user's COA is the EVM msg.sender.
+   *
+   * @param params.grossAmount     Gross amount in raw units (UFix64 * 10^8).
+   * @param params.coaEvmAddr      User's COA EVM hex address (for memoKey lookup).
+   * @param params.userCadenceAddr User's Flow wallet address (FCL signer context).
+   * @param params.prebuiltProof   Proof built server-side via /api/proof/wrap.
+   */
+  async wrapViaCoa(params: WrapParams & {
+    coaEvmAddr: string;
+    userCadenceAddr: string;
+    prebuiltProof: FTWrapViaCoaPrebuiltProof;
+  }): Promise<WrapResult> {
+    const fcl = await this._fcl();
+    const t = await this._fclTypes();
+
+    const memoKey = await this.getMemoKey(params.coaEvmAddr);
+    if (!memoKey) {
+      throw new Error(
+        `JanusFTAdapter.wrapViaCoa: COA ${params.coaEvmAddr} has no registered memoKey. Run publishMemoKey first.`
+      );
+    }
+
+    const bps = await this.feeBps();
+    const fee = bps === 0 ? 0n : (params.grossAmount * BigInt(bps)) / 10000n;
+    const netAmount = params.grossAmount - fee;
+
+    const orch = await orchestrateWrapWithPrebuiltProof({
+      grossAmount: params.grossAmount,
+      feeBps: bps,
+      senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
+      proof: params.prebuiltProof.proof,
+      txCommit: params.prebuiltProof.txCommit,
+      blinding: params.prebuiltProof.blinding,
+      publicInputs: params.prebuiltProof.publicInputs,
+    });
+
+    const cadence = buildWrapTx(this.entry.cadenceAddress, this.entry.ftContractName, this.entry.ftAddress);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txId: string = await fcl.mutate({
+      cadence,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      args: (arg: any, types: any) => [
+        arg(params.userCadenceAddr, types.Address),
+        arg(rawToUFix64(params.grossAmount), types.UFix64),
+        arg(rawToUFix64(netAmount), types.UFix64),
+        arg(orch.txCommit[0].toString(), types.UInt256),
+        arg(orch.txCommit[1].toString(), types.UInt256),
+        arg(orch.amountProof.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(orch.amountPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
+        arg(orch.ephPubkeyX.toString(), types.UInt256),
+        arg(orch.ephPubkeyY.toString(), types.UInt256),
+      ],
+      proposer: fcl.authz,
+      payer: fcl.authz,
+      authorizations: [fcl.authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txHash: txId, netAmount: orch.netAmount, fee: orch.fee };
+  }
+
+  /**
+   * shieldedTransferViaCoa — browser-safe shielded transfer for Cadence FT.
+   *
+   * @param params.coaEvmAddr      Sender's COA EVM hex address (for memoKey lookup).
+   * @param params.userCadenceAddr Sender's Flow wallet address (FCL signer context).
+   * @param params.prebuiltProof   Proof built server-side via /api/proof/shielded-transfer.
+   */
+  async shieldedTransferViaCoa(params: SendParams & {
+    coaEvmAddr: string;
+    userCadenceAddr: string;
+    prebuiltProof: FTShieldedTransferViaCoaPrebuiltProof;
+  }): Promise<SendResult> {
+    const fcl = await this._fcl();
+    const t = await this._fclTypes();
+
+    const [senderMemoKey, recipientMemoKey] = await Promise.all([
+      this.getMemoKey(params.coaEvmAddr),
+      this.getMemoKey(params.recipient),
+    ]);
+    if (!senderMemoKey) {
+      throw new Error(
+        `JanusFTAdapter.shieldedTransferViaCoa: COA ${params.coaEvmAddr} has no registered memoKey.`
+      );
+    }
+    if (!recipientMemoKey) {
+      throw new Error(
+        `JanusFTAdapter.shieldedTransferViaCoa: recipient ${params.recipient} has no memoKey.`
+      );
+    }
+
+    const orch = await orchestrateShieldedTransferWithPrebuiltProof({
+      currentBalance: params.currentBalance,
+      transferAmount: params.amount,
+      senderMemoKeypair: { privkey: 0n, pubkey: senderMemoKey },
+      recipientMemoKey,
+      memo: params.memo,
+      proof: params.prebuiltProof.proof,
+      publicInputs: params.prebuiltProof.publicInputs,
+      transferBlinding: params.prebuiltProof.transferBlinding,
+      newBlinding: params.prebuiltProof.newBlinding,
+    });
+
+    const cadence = buildShieldedTransferTx(this.entry.cadenceAddress);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txId: string = await fcl.mutate({
+      cadence,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      args: (arg: any, types: any) => [
+        arg(params.userCadenceAddr, types.Address),
+        arg(params.recipient, types.Address),
+        arg(orch.proof.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(orch.publicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
+        arg(orch.ephPubkeyX.toString(), types.UInt256),
+        arg(orch.ephPubkeyY.toString(), types.UInt256),
+        arg(Array.from(orch.encryptedNoteTo).map(String), types.Array(types.UInt8)),
+        arg(orch.ephPubkeyToX.toString(), types.UInt256),
+        arg(orch.ephPubkeyToY.toString(), types.UInt256),
+      ],
+      proposer: fcl.authz,
+      payer: fcl.authz,
+      authorizations: [fcl.authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txHash: txId };
+  }
+
+  /**
+   * unwrapViaCoa — browser-safe unwrap for Cadence FT.
+   *
+   * @param params.coaEvmAddr      User's COA EVM hex address (for memoKey lookup).
+   * @param params.userCadenceAddr User's Flow wallet address (FCL signer context).
+   * @param params.prebuiltProofs  Proofs built server-side via /api/proof/unwrap.
+   */
+  async unwrapViaCoa(params: UnwrapParams & {
+    coaEvmAddr: string;
+    userCadenceAddr: string;
+    prebuiltProofs: FTUnwrapViaCoaPrebuiltProofs;
+  }): Promise<UnwrapResult> {
+    const fcl = await this._fcl();
+    const t = await this._fclTypes();
+
+    const memoKey = await this.getMemoKey(params.coaEvmAddr);
+    if (!memoKey) {
+      throw new Error(
+        `JanusFTAdapter.unwrapViaCoa: COA ${params.coaEvmAddr} has no registered memoKey.`
+      );
+    }
+
+    const bps = await this.feeBps();
+    const orch = await orchestrateUnwrapWithPrebuiltProofs({
+      claimedAmount: params.claimedAmount,
+      feeBps: bps,
+      currentBalance: params.currentBalance,
+      senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
+      amountProof: params.prebuiltProofs.amountProof,
+      txCommit: params.prebuiltProofs.txCommit,
+      amountPublicInputs: params.prebuiltProofs.amountPublicInputs,
+      transferProof: params.prebuiltProofs.transferProof,
+      transferPublicInputs: params.prebuiltProofs.transferPublicInputs,
+      newBlinding: params.prebuiltProofs.newBlinding,
+    });
+
+    const cadence = buildUnwrapTx(this.entry.cadenceAddress, this.entry.ftContractName, this.entry.ftAddress);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txId: string = await fcl.mutate({
+      cadence,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      args: (arg: any, types: any) => [
+        arg(params.userCadenceAddr, types.Address),
+        arg(rawToUFix64(params.claimedAmount), types.UFix64),
+        arg(params.recipient, types.Address),
+        arg(orch.txCommit[0].toString(), types.UInt256),
+        arg(orch.txCommit[1].toString(), types.UInt256),
+        arg(orch.amountProof.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(orch.amountPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(orch.transferProof.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(orch.transferPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
+        arg(orch.ephPubkeyX.toString(), types.UInt256),
+        arg(orch.ephPubkeyY.toString(), types.UInt256),
+      ],
+      proposer: fcl.authz,
+      payer: fcl.authz,
+      authorizations: [fcl.authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txHash: txId, netToRecipient: orch.netToRecipient };
   }
 
   async wrap(params: WrapParams, _signer: EVMSigner): Promise<WrapResult> {
