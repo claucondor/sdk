@@ -1,7 +1,7 @@
 /**
  * adapters/JanusTokenAdapter.ts — The single adapter interface all tokens implement.
  *
- * Every concrete token (JanusFlow, JanusWFLOW, JanusMockUSDC, JanusMockFT) must
+ * Every concrete token (JanusFlow, JanusWFLOW, JanusMockUSDC, JanusFT) must
  * satisfy this interface. The frontend only ever calls methods on this interface —
  * it never touches proof generation, fee math, or snapshot ordering directly.
  *

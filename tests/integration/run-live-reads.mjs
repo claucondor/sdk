@@ -141,7 +141,7 @@ await test("scanCadenceSnapshots(alice, mockft) over last 200 blocks doesn't thr
   const events = await scanCadenceSnapshots(
     ACTORS.alice.cadence,
     "0x7599043aea001283",
-    "JanusMockFT",
+    "JanusFT",
     { fromBlock: latest - 200, toBlock: latest }
   );
   return `events_found=${events.length}`;

@@ -1,9 +1,9 @@
 /**
- * adapters/janus-ft.ts — JanusTokenAdapter for variant="cadence-ft" (JanusMockFT).
+ * adapters/janus-ft.ts — JanusTokenAdapter for variant="cadence-ft" (JanusFT).
  *
- * Wraps a Cadence FungibleToken vault. Orchestration logic is identical to EVM
- * variants, but transaction submission goes through FCL and the Cadence
- * transaction templates.
+ * Wraps a Cadence FungibleToken vault. Generic wrapper — accepts any underlying
+ * FungibleToken configured in JanusFT.custodyVaultType (set at deploy time).
+ * For testnet, the underlying is MockFT. At mainnet, swap to the production FT.
  *
  * Key differences from EVM adapters:
  *   - wrap() signature has BOTH grossAmount and netAmount (explicit safety check)
@@ -13,12 +13,11 @@
  *   - Addresses are Cadence hex addresses (0x7-prefix), not EVM hex
  *
  * Selector trap: Cadence's cross-VM calldata for EVM selectors uses CANONICAL
- * uint256[N] form (not uint[N]). The deployed JanusMockFT hardcodes the correct
+ * uint256[N] form (not uint[N]). The deployed JanusFT hardcodes the correct
  * selectors. The SDK does NOT build cross-VM calldata here — it calls Cadence
  * transactions directly which handle the selector internally.
  *
- * EVM-side reads (commitment, memoKey): JanusMockFT mirrors these to an EVM
- * helper or we read from Cadence scripts. This adapter reads from Cadence scripts.
+ * EVM-side reads (commitment, memoKey): JanusFT reads from Cadence scripts.
  */
 
 import type { JanusTokenAdapter, EVMSigner } from "./JanusTokenAdapter";
@@ -48,12 +47,16 @@ import {
   scanCadenceIncomingNotes,
 } from "../scan/cadence-scanner";
 
-// Cadence transaction templates for JanusMockFT v0.6
-// These templates use the contract at the configured cadenceAddress
+// Cadence transaction templates for JanusFT v0.6
+// These templates use the contract at the configured cadenceAddress.
+// The underlying FT (MockFT for testnet) is imported inline where needed.
 
-function buildWrapTx(contractAddr: string): string {
+function buildWrapTx(contractAddr: string, ftContractName: string, ftAddress: string): string {
   return `
-import JanusMockFT from ${contractAddr}
+import JanusFT from ${contractAddr}
+import ${ftContractName} from ${ftAddress}
+import FungibleToken from 0x9a0766d93b6608b7
+import EVM from 0x8c5303eaa26202d6
 
 transaction(
   registryAddr: Address,
@@ -65,18 +68,37 @@ transaction(
   encryptedSnapshot: [UInt8],
   ephPubX: UInt256, ephPubY: UInt256
 ) {
+  let depositVault: @{FungibleToken.Vault}
+  let registryRef: &JanusFT.CommitmentRegistry
+  let senderAddress: Address
+  let coa: auth(EVM.Call) &EVM.CadenceOwnedAccount
+
   prepare(signer: auth(BorrowValue) &Account) {
-    JanusMockFT.wrap(
-      signer: signer,
-      registryAddr: registryAddr,
-      grossAmount: grossAmount,
+    self.senderAddress = signer.address
+    let userVault = signer.storage.borrow<auth(FungibleToken.Withdraw) &${ftContractName}.Vault>(
+      from: ${ftContractName}.VaultStoragePath
+    ) ?? panic("wrap_ft: signer has no ${ftContractName} vault")
+    self.depositVault <- userVault.withdraw(amount: grossAmount)
+    self.registryRef = signer.storage.borrow<&JanusFT.CommitmentRegistry>(
+      from: JanusFT.CommitmentRegistryStoragePath
+    ) ?? panic("wrap_ft: signer must hold the JanusFT registry")
+    self.coa = signer.storage.borrow<auth(EVM.Call) &EVM.CadenceOwnedAccount>(
+      from: /storage/evm
+    ) ?? panic("wrap_ft: no COA at /storage/evm")
+  }
+
+  execute {
+    self.registryRef.wrap(
+      account: self.senderAddress,
       netAmount: netAmount,
-      txCommit: JanusMockFT.Commitment(x: txCommitX, y: txCommitY),
+      depositVault: <- self.depositVault,
+      txCommit: JanusFT.Commitment(x: txCommitX, y: txCommitY),
       amountProof: amountProof,
       amountPublicInputs: amountPublicInputs,
       encryptedSnapshot: encryptedSnapshot,
       ephPubX: ephPubX,
-      ephPubY: ephPubY
+      ephPubY: ephPubY,
+      coa: self.coa
     )
   }
 }
@@ -85,81 +107,114 @@ transaction(
 
 function buildShieldedTransferTx(contractAddr: string): string {
   return `
-import JanusMockFT from ${contractAddr}
+import JanusFT from ${contractAddr}
+import EVM from 0x8c5303eaa26202d6
 
 transaction(
-  registryAddr: Address,
-  recipient: Address,
+  fromAccount: Address,
+  toAccount: Address,
+  transferProof: [UInt256],
   publicInputs: [UInt256],
-  proof: [UInt256],
-  encryptedSnapshot: [UInt8], ephPubX: UInt256, ephPubY: UInt256,
+  encryptedSnapshotFrom: [UInt8], ephPubFromX: UInt256, ephPubFromY: UInt256,
   encryptedNoteTo: [UInt8], ephPubToX: UInt256, ephPubToY: UInt256
 ) {
+  let registryRef: &JanusFT.CommitmentRegistry
+  let coa: auth(EVM.Call) &EVM.CadenceOwnedAccount
+
   prepare(signer: auth(BorrowValue) &Account) {
-    JanusMockFT.shieldedTransfer(
-      signer: signer,
-      registryAddr: registryAddr,
-      recipient: recipient,
+    self.registryRef = signer.storage.borrow<&JanusFT.CommitmentRegistry>(
+      from: JanusFT.CommitmentRegistryStoragePath
+    ) ?? panic("shielded_transfer_ft: signer must hold the JanusFT registry")
+    self.coa = signer.storage.borrow<auth(EVM.Call) &EVM.CadenceOwnedAccount>(
+      from: /storage/evm
+    ) ?? panic("shielded_transfer_ft: no COA at /storage/evm")
+  }
+
+  execute {
+    self.registryRef.shieldedTransfer(
+      fromAccount: fromAccount,
+      toAccount: toAccount,
+      transferProof: transferProof,
       publicInputs: publicInputs,
-      proof: proof,
-      encryptedSnapshot: encryptedSnapshot,
-      ephPubX: ephPubX,
-      ephPubY: ephPubY,
+      encryptedSnapshotFrom: encryptedSnapshotFrom,
+      ephPubFromX: ephPubFromX,
+      ephPubFromY: ephPubFromY,
       encryptedNoteTo: encryptedNoteTo,
       ephPubToX: ephPubToX,
-      ephPubToY: ephPubToY
+      ephPubToY: ephPubToY,
+      coa: self.coa
     )
   }
 }
 `;
 }
 
-function buildUnwrapTx(contractAddr: string): string {
+function buildUnwrapTx(contractAddr: string, ftContractName: string, ftAddress: string): string {
   return `
-import JanusMockFT from ${contractAddr}
+import JanusFT from ${contractAddr}
+import ${ftContractName} from ${ftAddress}
+import FungibleToken from 0x9a0766d93b6608b7
+import EVM from 0x8c5303eaa26202d6
 
 transaction(
-  accountAddress: Address,
+  account: Address,
   claimedAmount: UFix64,
   recipient: Address,
   txCommitX: UInt256, txCommitY: UInt256,
   amountProof: [UInt256],
   amountPublicInputs: [UInt256],
-  transferPublicInputs: [UInt256],
   transferProof: [UInt256],
+  transferPublicInputs: [UInt256],
   encryptedSnapshot: [UInt8], ephPubX: UInt256, ephPubY: UInt256
 ) {
+  let registryRef: &JanusFT.CommitmentRegistry
+  let coa: auth(EVM.Call) &EVM.CadenceOwnedAccount
+  let recipientRef: &{FungibleToken.Receiver}
+
   prepare(signer: auth(BorrowValue) &Account) {
-    JanusMockFT.unwrap(
-      signer: signer,
-      accountAddress: accountAddress,
+    self.registryRef = signer.storage.borrow<&JanusFT.CommitmentRegistry>(
+      from: JanusFT.CommitmentRegistryStoragePath
+    ) ?? panic("unwrap_ft: signer must hold the JanusFT registry")
+    self.coa = signer.storage.borrow<auth(EVM.Call) &EVM.CadenceOwnedAccount>(
+      from: /storage/evm
+    ) ?? panic("unwrap_ft: no COA at /storage/evm")
+    self.recipientRef = getAccount(recipient)
+      .capabilities.borrow<&{FungibleToken.Receiver}>(${ftContractName}.ReceiverPublicPath)
+      ?? panic("unwrap_ft: recipient has no ${ftContractName} receiver")
+  }
+
+  execute {
+    let netVault <- self.registryRef.unwrap(
+      account: account,
       claimedAmount: claimedAmount,
       recipient: recipient,
-      txCommit: JanusMockFT.Commitment(x: txCommitX, y: txCommitY),
+      txCommit: JanusFT.Commitment(x: txCommitX, y: txCommitY),
       amountProof: amountProof,
       amountPublicInputs: amountPublicInputs,
-      transferPublicInputs: transferPublicInputs,
       transferProof: transferProof,
+      transferPublicInputs: transferPublicInputs,
       encryptedSnapshot: encryptedSnapshot,
       ephPubX: ephPubX,
-      ephPubY: ephPubY
+      ephPubY: ephPubY,
+      coa: self.coa
     )
+    self.recipientRef.deposit(from: <- netVault)
   }
 }
 `;
 }
 
 function buildPublishMemoKeyTx(contractAddr: string): string {
-  // Mirrors cadence-crypto-lab setup_memo_key_mockft.cdc. JanusMockFT delegates
-  // to the shared JanusFlow.MemoKey resource at /storage/openjanusMemoKey, so
-  // publishing once via this tx makes the pubkey readable from all Janus apps.
+  // JanusFT delegates to the shared JanusFlow.MemoKey resource at
+  // /storage/openjanusMemoKey — publishing once makes the pubkey readable
+  // from all Janus Cadence apps.
   return `
-import JanusMockFT from ${contractAddr}
+import JanusFT from ${contractAddr}
 import JanusFlow from 0x5dcbeb41055ec57e
 
 transaction(pubkeyX: UInt256, pubkeyY: UInt256) {
   prepare(signer: auth(SaveValue, LoadValue, IssueStorageCapabilityController, PublishCapability, UnpublishCapability) &Account) {
-    JanusMockFT.publishMemoKey(account: signer, pubkeyX: pubkeyX, pubkeyY: pubkeyY)
+    JanusFT.publishMemoKey(account: signer, pubkeyX: pubkeyX, pubkeyY: pubkeyY)
   }
 }
 `;
@@ -246,7 +301,7 @@ access(all) fun main(addr: Address): {String: UInt256} {
 
   /**
    * Read the user's MemoKey from the shared JanusFlow MemoKey resource at
-   * 0x5dcbeb41055ec57e. JanusMockFT (and all v0.6 Cadence Janus tokens) use
+   * 0x5dcbeb41055ec57e. JanusFT (and all v0.6 Cadence Janus tokens) use
    * a SHARED memokey registry — publishing on JanusFlow.MemoKey makes the
    * pubkey readable from any Janus Cadence app via JanusFlow.getMemoPubkey(owner).
    * Returns null if no MemoKey resource is published at /public/openjanusMemoKey.
@@ -350,7 +405,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
     });
 
-    const cadence = buildWrapTx(this.entry.cadenceAddress);
+    const cadence = buildWrapTx(this.entry.cadenceAddress, this.entry.ftContractName, this.entry.ftAddress);
     const txId: string = await fcl.mutate({
       cadence,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -361,7 +416,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
         arg(orch.txCommit[0].toString(), types.UInt256),
         arg(orch.txCommit[1].toString(), types.UInt256),
         arg(orch.amountProof.map((v) => v.toString()), types.Array(types.UInt256)),
-        arg([] as string[], types.Array(types.UInt256)), // publicInputs
+        arg(orch.amountPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
         arg(orch.ephPubkeyX.toString(), types.UInt256),
         arg(orch.ephPubkeyY.toString(), types.UInt256),
@@ -426,7 +481,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       currentBlinding: params.currentBlinding,
       senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
     });
-    const cadence = buildUnwrapTx(this.entry.cadenceAddress);
+    const cadence = buildUnwrapTx(this.entry.cadenceAddress, this.entry.ftContractName, this.entry.ftAddress);
     const txId: string = await fcl.mutate({
       cadence,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -437,7 +492,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
         arg(orch.txCommit[0].toString(), types.UInt256),
         arg(orch.txCommit[1].toString(), types.UInt256),
         arg(orch.amountProof.map((v) => v.toString()), types.Array(types.UInt256)),
-        arg([] as string[], types.Array(types.UInt256)), // amountPublicInputs
+        arg(orch.amountPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(orch.transferPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(orch.transferProof.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
@@ -450,7 +505,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
   }
 
   /**
-   * Scan ShieldedTransferWithSnapshot events on JanusMockFT for incoming notes
+   * Scan ShieldedTransferWithSnapshot events on JanusFT for incoming notes
    * addressed to `addr`. Uses Flow REST events API.
    */
   async scanDeposits(addr: string, fromBlock?: bigint): Promise<DepositRecord[]> {

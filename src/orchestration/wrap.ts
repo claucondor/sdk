@@ -33,6 +33,8 @@ export interface WrapOrchestrateResult {
   blinding: bigint;
   txCommit: readonly [bigint, bigint];
   amountProof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
+  /** Amount-disclose public inputs [claimed_amount, Cx, Cy] — pass to JanusFT.wrap(). */
+  amountPublicInputs: readonly [bigint, bigint, bigint];
   encryptedSnapshot: Uint8Array;
   ephPubkeyX: bigint;
   ephPubkeyY: bigint;
@@ -77,6 +79,7 @@ export async function orchestrateWrap(
     blinding,
     txCommit: proofResult.txCommit,
     amountProof: proofResult.proof,
+    amountPublicInputs: proofResult.publicInputs,
     encryptedSnapshot: snapshotEnc.ciphertext,
     ephPubkeyX: snapshotEnc.ephemeralPubkey.x,
     ephPubkeyY: snapshotEnc.ephemeralPubkey.y,
