@@ -24,6 +24,16 @@ export const TOKEN_REGISTRY = {
     decimals: 18,
   } satisfies NativeTokenEntry,
 
+  // wflow: NOT redeployed in v0.6.6 — address retained from prior deploy for
+  // PrivateTip backward compatibility. State on this proxy may be stale.
+  // Do not use for new transactions until a fresh wflow proxy is deployed.
+  wflow: {
+    variant: "erc20",
+    proxy: "0x00129E94d5340bd19d0b4ed9CDf718BB6e0A9400",
+    underlying: "0xe7BbEAcC04A589e4B70922b2796Bb4F8e6e4873C", // WFLOW9
+    decimals: 18,
+  } satisfies ERC20TokenEntry,
+
   mockusdc: {
     variant: "erc20",
     proxy: "0x4689a36427115a6023BEb8c8b3c38E6fDF5Ae84F",
