@@ -19,6 +19,7 @@ import { buildAmountDiscloseProof } from "../crypto/amount-disclose";
 import { encryptSnapshot } from "../crypto/snapshot-schema";
 import { generateBlinding } from "../crypto/commitment";
 import type { BabyJubKeypair } from "../crypto/babyjub-keypair";
+import type { ProofUint256 } from "../types/proof";
 
 export interface WrapOrchestrateInput {
   grossAmount: bigint;
@@ -38,6 +39,71 @@ export interface WrapOrchestrateResult {
   encryptedSnapshot: Uint8Array;
   ephPubkeyX: bigint;
   ephPubkeyY: bigint;
+}
+
+/**
+ * Input for orchestrateWrapWithPrebuiltProof.
+ * Used by browser callers that built the proof via a server-side API route
+ * (because buildAmountDiscloseProof requires Node.js wasm/zkey file I/O).
+ *
+ * The browser generates blinding + calls POST /api/proof/wrap, which returns
+ * proof + txCommit. The browser then passes everything here for snapshot
+ * encryption and calldata assembly.
+ */
+export interface WrapOrchestratePrebuiltInput {
+  grossAmount: bigint;
+  feeBps: number;
+  senderMemoKeypair: BabyJubKeypair;
+  /** Pre-built Groth16 proof (uint256[8]) from the server-side route. */
+  proof: ProofUint256;
+  /** Pedersen commitment (Cx, Cy) from the server-side route. */
+  txCommit: readonly [bigint, bigint];
+  /** Blinding factor generated client-side and sent to the server-side route. */
+  blinding: bigint;
+  /** Public inputs [claimed_amount, Cx, Cy] — needed for amountPublicInputs. */
+  publicInputs: readonly [bigint, bigint, bigint];
+}
+
+/**
+ * Orchestrate a wrap with a pre-built proof (browser-safe path).
+ *
+ * Skips buildAmountDiscloseProof (Node.js only) and uses the proof + blinding
+ * supplied by the caller. Performs only snapshot encryption (pure crypto,
+ * browser-safe) and packages all calldata fields.
+ */
+export async function orchestrateWrapWithPrebuiltProof(
+  input: WrapOrchestratePrebuiltInput
+): Promise<WrapOrchestrateResult> {
+  const { grossAmount, feeBps, senderMemoKeypair, proof, txCommit, blinding, publicInputs } = input;
+
+  const fee = feeBps === 0 ? 0n : (grossAmount * BigInt(feeBps)) / 10000n;
+  const netAmount = grossAmount - fee;
+
+  if (netAmount <= 0n) {
+    throw new RangeError(
+      `orchestrateWrapWithPrebuiltProof: netAmount ${netAmount} is not positive`
+    );
+  }
+
+  // Encrypt snapshot to sender's own memokey (same as regular path).
+  const nowMs = Date.now();
+  const snapshotEnc = await encryptSnapshot(
+    { balance: netAmount, blinding, timestampMs: nowMs },
+    senderMemoKeypair.pubkey
+  );
+
+  return {
+    grossAmount,
+    netAmount,
+    fee,
+    blinding,
+    txCommit,
+    amountProof: proof,
+    amountPublicInputs: publicInputs,
+    encryptedSnapshot: snapshotEnc.ciphertext,
+    ephPubkeyX: snapshotEnc.ephemeralPubkey.x,
+    ephPubkeyY: snapshotEnc.ephemeralPubkey.y,
+  };
 }
 
 /**

@@ -24,6 +24,7 @@ import { encryptNote } from "../crypto/note-schema";
 import { generateBlinding } from "../crypto/commitment";
 import type { BabyJubKeypair } from "../crypto/babyjub-keypair";
 import type { Point } from "../types/commitment";
+import type { ProofUint256 } from "../types/proof";
 
 export interface ShieldedTransferOrchestrateInput {
   currentBalance: bigint;
@@ -50,6 +51,92 @@ export interface ShieldedTransferOrchestrateResult {
   newBalance: bigint;
   newBlinding: bigint;
   transferBlinding: bigint;
+}
+
+/**
+ * Input for orchestrateShieldedTransferWithPrebuiltProof.
+ * Browser callers POST to /api/proof/shielded-transfer and pass the result here.
+ * The blindings must be generated client-side BEFORE the API call so they can
+ * be used for snapshot and note encryption here.
+ */
+export interface ShieldedTransferOrchestratePrebuiltInput {
+  currentBalance: bigint;
+  transferAmount: bigint;
+  senderMemoKeypair: BabyJubKeypair;
+  recipientMemoKey: Point;
+  memo?: string;
+  tipId?: string;
+  /** Pre-built ConfidentialTransfer proof (uint256[8]). */
+  proof: ProofUint256;
+  /** Public inputs [C_old.x, C_old.y, C_tx.x, C_tx.y, C_new.x, C_new.y]. */
+  publicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
+  /** Transfer blinding used when computing C_tx (needed for recipient note). */
+  transferBlinding: bigint;
+  /** New blinding for the residual commitment (needed for snapshot). */
+  newBlinding: bigint;
+}
+
+/**
+ * Orchestrate a shielded transfer with a pre-built proof (browser-safe path).
+ *
+ * Skips buildShieldedTransferProof (Node.js only). Performs only snapshot
+ * and note encryption (pure ECIES crypto, browser-safe).
+ */
+export async function orchestrateShieldedTransferWithPrebuiltProof(
+  input: ShieldedTransferOrchestratePrebuiltInput
+): Promise<ShieldedTransferOrchestrateResult> {
+  const {
+    currentBalance,
+    transferAmount,
+    senderMemoKeypair,
+    recipientMemoKey,
+    memo,
+    tipId,
+    proof,
+    publicInputs,
+    transferBlinding,
+    newBlinding,
+  } = input;
+
+  if (transferAmount <= 0n) {
+    throw new RangeError(
+      `orchestrateShieldedTransferWithPrebuiltProof: transferAmount must be > 0, got ${transferAmount}`
+    );
+  }
+  if (transferAmount > currentBalance) {
+    throw new RangeError(
+      `orchestrateShieldedTransferWithPrebuiltProof: transferAmount ${transferAmount} exceeds balance ${currentBalance}`
+    );
+  }
+
+  const newBalance = currentBalance - transferAmount;
+  const nowMs = Date.now();
+
+  // Encrypt sender's residual snapshot (ephemeral A)
+  const snapshotEnc = await encryptSnapshot(
+    { balance: newBalance, blinding: newBlinding, timestampMs: nowMs },
+    senderMemoKeypair.pubkey
+  );
+
+  // Encrypt note to recipient (ephemeral B — different ephemeral)
+  const noteEnc = await encryptNote(
+    { amount: transferAmount, blinding: transferBlinding, memo, tipId },
+    recipientMemoKey
+  );
+
+  return {
+    publicInputs,
+    proof,
+    encryptedSnapshot: snapshotEnc.ciphertext,
+    ephPubkeyX: snapshotEnc.ephemeralPubkey.x,
+    ephPubkeyY: snapshotEnc.ephemeralPubkey.y,
+    encryptedNoteTo: noteEnc.ciphertext,
+    ephPubkeyToX: noteEnc.ephemeralPubkey.x,
+    ephPubkeyToY: noteEnc.ephemeralPubkey.y,
+    newBalance,
+    newBlinding,
+    transferBlinding,
+  };
 }
 
 /**

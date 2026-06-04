@@ -20,6 +20,7 @@ import { buildShieldedTransferProof } from "../crypto/shielded-transfer";
 import { encryptSnapshot } from "../crypto/snapshot-schema";
 import { generateBlinding } from "../crypto/commitment";
 import type { BabyJubKeypair } from "../crypto/babyjub-keypair";
+import type { ProofUint256 } from "../types/proof";
 
 export interface UnwrapOrchestrateInput {
   claimedAmount: bigint;
@@ -45,6 +46,90 @@ export interface UnwrapOrchestrateResult {
   // For local state update after tx
   newBalance: bigint;
   newBlinding: bigint;
+}
+
+/**
+ * Input for orchestrateUnwrapWithPrebuiltProofs.
+ * Browser callers POST to /api/proof/unwrap and receive both proofs.
+ * transferBlinding is generated client-side before the API call.
+ */
+export interface UnwrapOrchestratePrebuiltInput {
+  claimedAmount: bigint;
+  feeBps: number;
+  currentBalance: bigint;
+  senderMemoKeypair: BabyJubKeypair;
+  /** AmountDisclose proof (uint256[8]) for claimedAmount. */
+  amountProof: ProofUint256;
+  /** AmountDisclose txCommit [Cx, Cy]. */
+  txCommit: readonly [bigint, bigint];
+  /** AmountDisclose publicInputs [claimed_amount, Cx, Cy]. */
+  amountPublicInputs: readonly [bigint, bigint, bigint];
+  /** ConfidentialTransfer proof (uint256[8]) for the residual spend. */
+  transferProof: ProofUint256;
+  /** ConfidentialTransfer publicInputs [C_old.x,y, C_tx.x,y, C_new.x,y]. */
+  transferPublicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
+  /** New blinding for the residual commitment (needed for snapshot encryption). */
+  newBlinding: bigint;
+}
+
+/**
+ * Orchestrate an unwrap with pre-built proofs (browser-safe path).
+ *
+ * Skips both proof builders (Node.js only). Performs only snapshot
+ * encryption (pure ECIES crypto, browser-safe).
+ */
+export async function orchestrateUnwrapWithPrebuiltProofs(
+  input: UnwrapOrchestratePrebuiltInput
+): Promise<UnwrapOrchestrateResult> {
+  const {
+    claimedAmount,
+    feeBps,
+    currentBalance,
+    senderMemoKeypair,
+    amountProof,
+    txCommit,
+    amountPublicInputs,
+    transferProof,
+    transferPublicInputs,
+    newBlinding,
+  } = input;
+
+  if (claimedAmount <= 0n) {
+    throw new RangeError(
+      `orchestrateUnwrapWithPrebuiltProofs: claimedAmount must be > 0, got ${claimedAmount}`
+    );
+  }
+  if (claimedAmount > currentBalance) {
+    throw new RangeError(
+      `orchestrateUnwrapWithPrebuiltProofs: claimedAmount ${claimedAmount} exceeds balance ${currentBalance}`
+    );
+  }
+
+  const fee = feeBps === 0 ? 0n : (claimedAmount * BigInt(feeBps)) / 10000n;
+  const netToRecipient = claimedAmount - fee;
+  const newBalance = currentBalance - claimedAmount;
+  const nowMs = Date.now();
+
+  const snapshotEnc = await encryptSnapshot(
+    { balance: newBalance, blinding: newBlinding, timestampMs: nowMs },
+    senderMemoKeypair.pubkey
+  );
+
+  return {
+    claimedAmount,
+    netToRecipient,
+    fee,
+    txCommit,
+    amountProof,
+    amountPublicInputs,
+    transferPublicInputs,
+    transferProof,
+    encryptedSnapshot: snapshotEnc.ciphertext,
+    ephPubkeyX: snapshotEnc.ephemeralPubkey.x,
+    ephPubkeyY: snapshotEnc.ephemeralPubkey.y,
+    newBalance,
+    newBlinding,
+  };
 }
 
 /**
