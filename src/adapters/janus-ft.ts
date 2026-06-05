@@ -256,6 +256,59 @@ transaction(
 `;
 }
 
+/**
+ * Build the user_install_janus_ft_registry Cadence transaction.
+ *
+ * Idempotent — handles three storage states on the signer's account:
+ *   A. No resource at path → install fresh CommitmentRegistry.
+ *   B. Correct type (current JanusFT.CommitmentRegistry) → no-op, republish cap.
+ *   C. Stale resource from a previous JanusFT contract address (e.g. v0.6) →
+ *      load as @AnyResource, destroy, install fresh registry.
+ *
+ * No arguments. Only requires signer permissions (no Admin entitlement).
+ * Gas: ~0.00074 FLOW on testnet (measured on bob 2026-06-05).
+ *
+ * Must be run once before the first MockFT wrap on any account.
+ */
+function buildInstallUserRegistryTx(contractAddr: string, ftContractName: string, ftAddress: string): string {
+  return `
+import JanusFT from ${contractAddr}
+import ${ftContractName} from ${ftAddress}
+import FungibleToken from 0x9a0766d93b6608b7
+
+transaction {
+  prepare(signer: auth(BorrowValue, SaveValue, LoadValue, IssueStorageCapabilityController, PublishCapability, UnpublishCapability) &Account) {
+    let storagePath = JanusFT.CommitmentRegistryStoragePath
+    let publicPath  = JanusFT.CommitmentRegistryPublicPath
+
+    let storedType = signer.storage.type(at: storagePath)
+
+    if storedType == nil {
+      // Case A: path empty — install fresh registry
+      let emptyVault <- ${ftContractName}.createEmptyVault(vaultType: Type<@${ftContractName}.Vault>())
+      let registry   <- JanusFT.createRegistry(vault: <- emptyVault)
+      signer.storage.save(<- registry, to: storagePath)
+    } else if storedType == Type<@JanusFT.CommitmentRegistry>() {
+      // Case B: correct type already present — no-op on storage
+    } else {
+      // Case C: stale resource from a previous JanusFT contract — destroy and reinstall
+      let stale <- signer.storage.load<@AnyResource>(from: storagePath)
+        ?? panic("user_install_janus_ft_registry: expected stale resource but load returned nil")
+      destroy stale
+      let emptyVault <- ${ftContractName}.createEmptyVault(vaultType: Type<@${ftContractName}.Vault>())
+      let registry   <- JanusFT.createRegistry(vault: <- emptyVault)
+      signer.storage.save(<- registry, to: storagePath)
+    }
+
+    // Republish capability (safe to re-issue even if already published)
+    signer.capabilities.unpublish(publicPath)
+    let cap = signer.capabilities.storage.issue<&{JanusFT.CommitmentRegistryPublic}>(storagePath)
+    signer.capabilities.publish(cap, at: publicPath)
+  }
+}
+`;
+}
+
 function buildPublishMemoKeyTx(contractAddr: string): string {
   // Publishes the BabyJub memo pubkey to BOTH:
   //   1. Cadence /storage/openjanusMemoKey (shared with JanusFlow.MemoKey — one path, all Cadence tokens)
@@ -498,6 +551,64 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
         arg(memoKeypair.pubkey.x.toString(), types.UInt256),
         arg(memoKeypair.pubkey.y.toString(), types.UInt256),
       ],
+    });
+    await fcl.tx(txId).onceSealed();
+    return { txHash: txId };
+  }
+
+  /**
+   * buildInstallUserRegistryTx — returns the Cadence transaction string that installs
+   * (or replaces) the user's JanusFT.CommitmentRegistry.
+   *
+   * Call this ONCE before the user's first MockFT wrap. The transaction is idempotent:
+   *   - Fresh account: installs new registry.
+   *   - Already has current registry: no-op on storage, republishes capability.
+   *   - Has stale v0.6 registry (wrong contract address): destroys old resource,
+   *     installs fresh registry.
+   *
+   * No arguments required. The returned Cadence string can be passed directly to
+   * fcl.mutate({ cadence, args: () => [] }).
+   *
+   * @example
+   *   const adapter = sdk.token('mockft') as JanusFTAdapter;
+   *   const cadence = adapter.buildInstallUserRegistryTx();
+   *   const txId = await fcl.mutate({
+   *     cadence,
+   *     args: () => [],
+   *     proposer: fcl.authz,
+   *     payer: fcl.authz,
+   *     authorizations: [fcl.authz],
+   *     limit: 9999,
+   *   });
+   *   await fcl.tx(txId).onceSealed();
+   */
+  buildInstallUserRegistryTx(): string {
+    return buildInstallUserRegistryTx(
+      this.entry.cadenceAddress,
+      this.entry.ftContractName,
+      this.entry.ftAddress,
+    );
+  }
+
+  /**
+   * installUserRegistry — convenience wrapper that signs and submits the
+   * install-registry transaction via FCL. Returns the sealed txId.
+   *
+   * Equivalent to:
+   *   const cadence = adapter.buildInstallUserRegistryTx();
+   *   const txId = await fcl.mutate({ cadence, args: () => [] });
+   *   await fcl.tx(txId).onceSealed();
+   */
+  async installUserRegistry(): Promise<TxResult> {
+    const fcl = await this._fcl();
+    const cadence = this.buildInstallUserRegistryTx();
+    const txId: string = await fcl.mutate({
+      cadence,
+      args: () => [],
+      proposer: fcl.authz,
+      payer: fcl.authz,
+      authorizations: [fcl.authz],
+      limit: 9999,
     });
     await fcl.tx(txId).onceSealed();
     return { txHash: txId };
