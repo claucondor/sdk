@@ -37,8 +37,12 @@ export const TOKEN_REGISTRY = {
 
   mockft: {
     variant: "cadence-ft",
-    cadenceAddress: "0x7599043aea001283",
+    // cadenceAddress: JanusFT wrapper contract (aggregate v0.7, migrated 2026-06-05).
+    // Deployed under v066-admin account — holds CommitmentRegistry + aggregate verifier calls.
+    cadenceAddress: "0xc4e8f99915893a2f",
     contractName: "JanusFT",
+    // ftAddress: underlying MockFT FT contract (unchanged — was NOT redeployed).
+    // The old address (0x7599043aea001283) was the v0.6 JanusFT wrapper; MockFT still lives there.
     ftAddress: "0x7599043aea001283",
     ftContractName: "MockFT",
     decimals: 8, // UFix64 internal: 1.0 = 100_000_000
