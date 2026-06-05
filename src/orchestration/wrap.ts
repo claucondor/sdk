@@ -5,7 +5,7 @@
  * No adapter or frontend should re-implement this sequence.
  *
  * Sequence:
- *   1. Resolve nonce (from localStorage in browser, parameter in Node).
+ *   1. Resolve nonce (random 256-bit if not explicitly provided).
  *   2. Read feeBps from contract.
  *   3. Compute netAmount = gross - fee.
  *   4. Build AmountDisclose proof for netAmount + fresh blinding + nonce.
@@ -15,11 +15,14 @@
  * CRITICAL: The proof MUST bind to netAmount, not grossAmount.
  * Binding to grossAmount causes a silent verification revert.
  *
- * Nonce tracking (per-user, per-token):
- *   Browser: localStorage key "openjanus:wrap-nonce:<addr>:<tokenId>", starts at 1.
- *   Node:    Accept nonce as explicit parameter (tests and automation).
+ * Nonce strategy (v0.7.4+):
+ *   Random 256-bit nonce generated via @noble/hashes randomBytes.
+ *   Collision probability: 1/2^256 (negligible).
+ *   No local state (localStorage) needed — works across devices without coordination.
+ *   If input.nonce is explicitly provided (tests, replay), it is used as-is.
  */
 
+import { randomBytes } from "@noble/hashes/utils";
 import { buildAmountDiscloseProof } from "../crypto/amount-disclose";
 import { encryptSnapshot } from "../crypto/snapshot-schema";
 import { generateBlinding } from "../crypto/commitment";
@@ -27,37 +30,19 @@ import type { BabyJubKeypair } from "../crypto/babyjub-keypair";
 import type { ProofUint256 } from "../types/proof";
 
 // ---------------------------------------------------------------------------
-// Nonce helpers
+// Random nonce helper
 // ---------------------------------------------------------------------------
 
-const NONCE_KEY_PREFIX = "openjanus:wrap-nonce";
-
 /**
- * Read the next nonce for (userAddr, tokenId) from localStorage.
- * Returns 1n if no nonce has been stored yet.
- * Browser-only — throws in Node.js (pass nonce explicitly via orchestrateWrap).
+ * Generate a cryptographically random 256-bit nonce as a bigint.
+ * Uses @noble/hashes randomBytes (works in Node.js and browsers).
+ * Collision probability: 1/2^256.
  */
-export function readNonce(userAddr: string, tokenId: string): bigint {
-  if (typeof localStorage === "undefined") {
-    throw new Error(
-      "readNonce: localStorage is not available. Pass nonce explicitly via orchestrateWrap({ nonce: ... })."
-    );
-  }
-  const key = `${NONCE_KEY_PREFIX}:${userAddr.toLowerCase()}:${tokenId}`;
-  const stored = localStorage.getItem(key);
-  return stored ? BigInt(stored) : 1n;
-}
-
-/**
- * Advance the stored nonce for (userAddr, tokenId) after a successful wrap.
- * Increments by 1 and persists to localStorage.
- * Browser-only.
- */
-export function advanceNonce(userAddr: string, tokenId: string): void {
-  if (typeof localStorage === "undefined") return;
-  const key = `${NONCE_KEY_PREFIX}:${userAddr.toLowerCase()}:${tokenId}`;
-  const current = readNonce(userAddr, tokenId);
-  localStorage.setItem(key, (current + 1n).toString());
+export function randomNonce256(): bigint {
+  const bytes = randomBytes(32);
+  let n = 0n;
+  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,14 +54,11 @@ export interface WrapOrchestrateInput {
   feeBps: number;
   senderMemoKeypair: BabyJubKeypair;
   /**
-   * Anti-replay nonce for this wrap. Required in Node.js.
-   * In the browser, omit to auto-read from localStorage (keyed by senderAddr + tokenId).
+   * Anti-replay nonce for this wrap.
+   * If omitted, a random 256-bit nonce is generated automatically.
+   * Pass explicitly only for deterministic tests or proof replay.
    */
   nonce?: bigint;
-  /** Sender's EVM address — used for localStorage nonce key (browser only). */
-  senderAddr?: string;
-  /** Token registry key — used for localStorage nonce key (browser only). */
-  tokenId?: string;
 }
 
 export interface WrapOrchestrateResult {
@@ -180,16 +162,8 @@ export async function orchestrateWrap(
     );
   }
 
-  // 2. Resolve nonce
-  let nonce: bigint;
-  if (input.nonce !== undefined) {
-    nonce = input.nonce;
-  } else if (input.senderAddr && input.tokenId) {
-    nonce = readNonce(input.senderAddr, input.tokenId);
-  } else {
-    // Fallback: use timestamp-derived nonce for Node.js callers who don't pass nonce
-    nonce = BigInt(Date.now());
-  }
+  // 2. Resolve nonce — random 256-bit unless caller supplies explicit override
+  const nonce: bigint = input.nonce !== undefined ? input.nonce : randomNonce256();
 
   // 3. Fresh blinding for this wrap
   const blinding = generateBlinding();
