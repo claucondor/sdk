@@ -25,9 +25,10 @@ function buildBytes(bytes: number[]): { type: string; value: Array<{ type: strin
   };
 }
 
-const ALICE = "0x7599043aea001283";
+const ALICE = "0xc4e8f99915893a2f";
 const BOB = "0xd807a3992d7be612";
-const CONTRACT_ADDR = "0x7599043aea001283";
+// JanusFT v0.7 contract address (migrated 2026-06-05; was 0xc4e8f99915893a2f in v0.6)
+const CONTRACT_ADDR = "0xc4e8f99915893a2f";
 const CONTRACT_NAME = "JanusFT";
 
 let originalFetch: typeof fetch;
@@ -44,7 +45,7 @@ afterEach(() => {
 describe("cadence-scanner — JSON-CDC event parsing", () => {
   it("scanCadenceSnapshots picks up WrapWithSnapshot for the user as actor", async () => {
     const wrapPayload = buildEventPayload(
-      `A.7599043aea001283.JanusFT.WrapWithSnapshot`,
+      `A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot`,
       [
         { name: "account", value: { type: "Address", value: ALICE } },
         { name: "grossAmount", value: { type: "UFix64", value: "50.0" } },
@@ -60,14 +61,14 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
       if (u.includes("blocks?height=sealed")) {
         return new Response(JSON.stringify([{ header: { height: "300000" } }]), { status: 200 });
       }
-      if (u.includes("type=A.7599043aea001283.JanusFT.WrapWithSnapshot")) {
+      if (u.includes("type=A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot")) {
         return new Response(
           JSON.stringify([{
             block_height: "299900",
             block_timestamp: "2026-06-01T12:00:00.000Z",
             block_id: "abc",
             events: [{
-              type: "A.7599043aea001283.JanusFT.WrapWithSnapshot",
+              type: "A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot",
               transaction_id: "tx-wrap-1",
               transaction_index: "0",
               event_index: "0",
@@ -97,7 +98,7 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
 
   it("scanCadenceSnapshots filters out events for OTHER users", async () => {
     const wrapPayloadForBob = buildEventPayload(
-      `A.7599043aea001283.JanusFT.WrapWithSnapshot`,
+      `A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot`,
       [
         { name: "account", value: { type: "Address", value: BOB } },
         { name: "grossAmount", value: { type: "UFix64", value: "10.0" } },
@@ -113,14 +114,14 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
       if (u.includes("blocks?height=sealed")) {
         return new Response(JSON.stringify([{ header: { height: "300000" } }]), { status: 200 });
       }
-      if (u.includes("type=A.7599043aea001283.JanusFT.WrapWithSnapshot")) {
+      if (u.includes("type=A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot")) {
         return new Response(
           JSON.stringify([{
             block_height: "299900",
             block_timestamp: "2026-06-01T12:00:00.000Z",
             block_id: "abc",
             events: [{
-              type: "A.7599043aea001283.JanusFT.WrapWithSnapshot",
+              type: "A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot",
               transaction_id: "tx-bob-wrap",
               transaction_index: "0",
               event_index: "0",
@@ -143,7 +144,7 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
 
   it("scanCadenceIncomingNotes returns all ShieldedTransferWithSnapshot events (no addr filter — privacy by design)", async () => {
     const transferPayload = buildEventPayload(
-      `A.7599043aea001283.JanusFT.ShieldedTransferWithSnapshot`,
+      `A.c4e8f99915893a2f.JanusFT.ShieldedTransferWithSnapshot`,
       [
         { name: "fromCommitX", value: { type: "UInt256", value: "11" } },
         { name: "fromCommitY", value: { type: "UInt256", value: "22" } },
@@ -163,14 +164,14 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
       if (u.includes("blocks?height=sealed")) {
         return new Response(JSON.stringify([{ header: { height: "300000" } }]), { status: 200 });
       }
-      if (u.includes("type=A.7599043aea001283.JanusFT.ShieldedTransferWithSnapshot")) {
+      if (u.includes("type=A.c4e8f99915893a2f.JanusFT.ShieldedTransferWithSnapshot")) {
         return new Response(
           JSON.stringify([{
             block_height: "299950",
             block_timestamp: "2026-06-01T13:00:00.000Z",
             block_id: "def",
             events: [{
-              type: "A.7599043aea001283.JanusFT.ShieldedTransferWithSnapshot",
+              type: "A.c4e8f99915893a2f.JanusFT.ShieldedTransferWithSnapshot",
               transaction_id: "tx-xfer",
               transaction_index: "0",
               event_index: "0",
@@ -199,7 +200,7 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
     const charlie = "0x3c601a443c81e6cd";
     void charlie;
     const transferToCharlie = buildEventPayload(
-      `A.7599043aea001283.JanusFT.ShieldedTransferWithSnapshot`,
+      `A.c4e8f99915893a2f.JanusFT.ShieldedTransferWithSnapshot`,
       [
         { name: "fromCommitX", value: { type: "UInt256", value: "5" } },
         { name: "fromCommitY", value: { type: "UInt256", value: "6" } },
@@ -226,7 +227,7 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
             block_timestamp: "2026-06-01T13:30:00.000Z",
             block_id: "ghi",
             events: [{
-              type: "A.7599043aea001283.JanusFT.ShieldedTransferWithSnapshot",
+              type: "A.c4e8f99915893a2f.JanusFT.ShieldedTransferWithSnapshot",
               transaction_id: "tx-to-charlie",
               transaction_index: "0",
               event_index: "0",
@@ -250,7 +251,7 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
   });
 
   it("returns events sorted by blockHeight ascending", async () => {
-    const ev1 = buildEventPayload(`A.7599043aea001283.JanusFT.WrapWithSnapshot`, [
+    const ev1 = buildEventPayload(`A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot`, [
       { name: "account", value: { type: "Address", value: ALICE } },
       { name: "grossAmount", value: { type: "UFix64", value: "1.0" } },
       { name: "netAmount", value: { type: "UFix64", value: "0.99" } },
@@ -258,7 +259,7 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
       { name: "ephPubX", value: { type: "UInt256", value: "1" } },
       { name: "ephPubY", value: { type: "UInt256", value: "1" } },
     ]);
-    const ev2 = buildEventPayload(`A.7599043aea001283.JanusFT.WrapWithSnapshot`, [
+    const ev2 = buildEventPayload(`A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot`, [
       { name: "account", value: { type: "Address", value: ALICE } },
       { name: "grossAmount", value: { type: "UFix64", value: "2.0" } },
       { name: "netAmount", value: { type: "UFix64", value: "1.99" } },
@@ -280,7 +281,7 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
               block_timestamp: "2026-06-01T14:00:00.000Z",
               block_id: "later",
               events: [{
-                type: "A.7599043aea001283.JanusFT.WrapWithSnapshot",
+                type: "A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot",
                 transaction_id: "tx-later",
                 transaction_index: "0",
                 event_index: "0",
@@ -292,7 +293,7 @@ describe("cadence-scanner — JSON-CDC event parsing", () => {
               block_timestamp: "2026-06-01T12:00:00.000Z",
               block_id: "earlier",
               events: [{
-                type: "A.7599043aea001283.JanusFT.WrapWithSnapshot",
+                type: "A.c4e8f99915893a2f.JanusFT.WrapWithSnapshot",
                 transaction_id: "tx-earlier",
                 transaction_index: "0",
                 event_index: "0",
