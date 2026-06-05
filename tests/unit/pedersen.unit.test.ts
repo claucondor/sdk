@@ -1,8 +1,11 @@
 /**
  * Unit tests for Pedersen commitment operations — no network required.
  *
+ * v0.7: computeCommitment uses 2-gen Pedersen ([v]·G + [r]·H).
+ * Value range: [0, 2^128); blinding range: [0, SUBORDER).
+ *
  * Tests computeCommitment, addCommitmentsLocal, negateCommitment,
- * identityCommitment, and isIdentityCommitment using circomlibjs.
+ * identityCommitment, and isIdentityCommitment.
  */
 
 import { describe, it, expect } from "vitest";
@@ -14,8 +17,9 @@ import {
   isIdentityCommitment,
 } from "../../src/primitives/pedersen";
 import { CURVE_P } from "../../src/types/commitment";
+import { SUBORDER } from "@openjanus/commitment";
 
-describe("computeCommitment", () => {
+describe("computeCommitment (2-gen Pedersen)", () => {
   it("returns a BabyJubJub field element (x, y < P)", async () => {
     const c = await computeCommitment(100n, 999n);
     expect(c.x).toBeGreaterThanOrEqual(0n);
@@ -48,26 +52,39 @@ describe("computeCommitment", () => {
     expect(isIdentityCommitment(c)).toBe(false);
   });
 
-  it("throws if value >= 2^64", async () => {
-    await expect(computeCommitment(1n << 64n, 0n)).rejects.toThrow(
-      "value must be in [0, 2^64)"
+  it("throws if value >= 2^128 (v0.7 128-bit cap)", async () => {
+    await expect(computeCommitment(1n << 128n, 1n)).rejects.toThrow(
+      "value must be in [0, 2^128)"
     );
   });
 
-  it("throws if blinding >= 2^128", async () => {
-    await expect(computeCommitment(1n, 1n << 128n)).rejects.toThrow(
-      "blinding must be in [0, 2^128)"
+  it("throws if blinding >= SUBORDER (~2^252)", async () => {
+    await expect(computeCommitment(1n, SUBORDER)).rejects.toThrow(
+      "blinding must be in [0, SUBORDER)"
     );
   });
 
-  it("max valid value (2^64 - 1) is accepted", async () => {
-    const c = await computeCommitment((1n << 64n) - 1n, 1n);
+  it("max valid value (2^128 - 1) is accepted", async () => {
+    const c = await computeCommitment((1n << 128n) - 1n, 1n);
     expect(typeof c.x).toBe("bigint");
   });
 
-  it("max valid blinding (2^128 - 1) is accepted", async () => {
-    const c = await computeCommitment(1n, (1n << 128n) - 1n);
+  it("max valid blinding (SUBORDER - 1) is accepted", async () => {
+    const c = await computeCommitment(1n, SUBORDER - 1n);
     expect(typeof c.x).toBe("bigint");
+  });
+
+  it("additively homomorphic: commit(a,r1)+commit(b,r2) = commit(a+b, r1+r2)", async () => {
+    const a = 1000n;
+    const b = 500n;
+    const r1 = 12345678901234n;
+    const r2 = 98765432109876n;
+    const Ca = await computeCommitment(a, r1);
+    const Cb = await computeCommitment(b, r2);
+    const sum = await addCommitmentsLocal(Ca, Cb);
+    const direct = await computeCommitment(a + b, (r1 + r2) % SUBORDER);
+    expect(sum.x).toBe(direct.x);
+    expect(sum.y).toBe(direct.y);
   });
 });
 
@@ -90,22 +107,14 @@ describe("addCommitmentsLocal", () => {
   });
 
   it("produces a valid BabyJubJub point when adding two commitments", async () => {
-    // addCommitmentsLocal performs BabyJubJub point addition (EC group law).
-    // This is used to homomorphically accumulate commitments at a recipient's slot.
-    // NOTE: circomlib Pedersen hash is NOT a two-generator commitment scheme
-    // (it is a hash function), so Pedersen(a,r1) + Pedersen(b,r2) != Pedersen(a+b, r1+r2).
-    // The accumulation property is: the contract accumulates commitment POINTS additively,
-    // and the ZK circuit proves balance conservation at transfer time.
     const a = await computeCommitment(100n, 111n);
     const b = await computeCommitment(200n, 222n);
     const sum = await addCommitmentsLocal(a, b);
-    // Result must be a valid field element
     const P = BigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617");
     expect(sum.x).toBeGreaterThanOrEqual(0n);
     expect(sum.x).toBeLessThan(P);
     expect(sum.y).toBeGreaterThanOrEqual(0n);
     expect(sum.y).toBeLessThan(P);
-    // Result must be distinct from both inputs (non-degenerate)
     expect(sum.x).not.toBe(a.x);
     expect(sum.x).not.toBe(b.x);
   });

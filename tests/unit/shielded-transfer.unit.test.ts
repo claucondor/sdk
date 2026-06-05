@@ -1,8 +1,11 @@
 /**
  * Unit tests for crypto/shielded-transfer — buildShieldedTransferProof
  *
+ * v0.7: aggregate ConfidentialTransfer circuit — 2-gen Pedersen, 252-bit blindings.
+ *       Value range: [0, 2^128). Blinding range: [0, 2^252).
+ *
  * Covers:
- *   - v0.3 circuit artifacts exist with correct shape
+ *   - aggregate circuit artifacts exist with correct shape
  *   - Pure input validation (range guards) fails fast
  *   - End-to-end real-proof generation (skip with SKIP_PROOF_TESTS=1)
  */
@@ -16,13 +19,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PACKAGE_ROOT = resolve(__dirname, "..", "..");
 
-const TRANSFER_WASM = resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer.wasm");
-const TRANSFER_ZKEY = resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer_final.zkey");
+const TRANSFER_WASM = resolve(PACKAGE_ROOT, "circuits/aggregate/confidential_transfer_aggregate.wasm");
+const TRANSFER_ZKEY = resolve(PACKAGE_ROOT, "circuits/aggregate/confidential_transfer_aggregate_test.zkey");
 
 const SKIP_PROOFS = process.env["SKIP_PROOF_TESTS"] === "1";
 
-describe("v0.3 confidential-transfer artifacts", () => {
-  it("confidential_transfer.wasm has WASM magic bytes", () => {
+describe("aggregate confidential-transfer artifacts", () => {
+  it("confidential_transfer_aggregate.wasm has WASM magic bytes", () => {
     const buf = readFileSync(TRANSFER_WASM);
     expect(buf.length).toBeGreaterThan(100);
     expect(buf[0]).toBe(0x00);
@@ -31,7 +34,7 @@ describe("v0.3 confidential-transfer artifacts", () => {
     expect(buf[3]).toBe(0x6d);
   });
 
-  it("confidential_transfer_final.zkey exists (>100KB)", () => {
+  it("confidential_transfer_aggregate_test.zkey exists (>100KB)", () => {
     const buf = readFileSync(TRANSFER_ZKEY);
     expect(buf.length).toBeGreaterThan(100_000);
   });
@@ -51,17 +54,17 @@ describe("buildShieldedTransferProof input validation", () => {
     ).rejects.toThrow(RangeError);
   });
 
-  it("rejects oldBalance >= 2^64 (v0.3 64-bit cap)", async () => {
+  it("rejects oldBalance >= 2^128 (v0.7 128-bit cap)", async () => {
     const { buildShieldedTransferProof } = await import("../../src/crypto/shielded-transfer");
     await expect(
       buildShieldedTransferProof({
-        oldBalance: 1n << 64n,
+        oldBalance: 1n << 128n,
         oldBlinding: 1n,
         transferAmount: 0n,
         transferBlinding: 1n,
         newBlinding: 1n,
       })
-    ).rejects.toThrow(/2\^64/);
+    ).rejects.toThrow(/2\^128/);
   });
 
   it("rejects transferAmount > oldBalance (underflow)", async () => {
@@ -75,6 +78,19 @@ describe("buildShieldedTransferProof input validation", () => {
         newBlinding: 1n,
       })
     ).rejects.toThrow();
+  });
+
+  it("rejects blinding >= 2^252", async () => {
+    const { buildShieldedTransferProof } = await import("../../src/crypto/shielded-transfer");
+    await expect(
+      buildShieldedTransferProof({
+        oldBalance: 100n,
+        oldBlinding: 1n << 252n,
+        transferAmount: 0n,
+        transferBlinding: 1n,
+        newBlinding: 1n,
+      })
+    ).rejects.toThrow(/2\^252/);
   });
 });
 
