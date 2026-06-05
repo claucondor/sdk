@@ -1,23 +1,23 @@
 /**
- * adapters/janus-ft.ts — JanusTokenAdapter for variant="cadence-ft" (JanusFT).
+ * adapters/janus-ft.ts — JanusTokenAdapter for variant="cadence-ft" (JanusFT v0.7).
  *
  * Wraps a Cadence FungibleToken vault. Generic wrapper — accepts any underlying
  * FungibleToken configured in JanusFT.custodyVaultType (set at deploy time).
- * For testnet, the underlying is MockFT. At mainnet, swap to the production FT.
+ * For testnet, the underlying is MockFT (0x7599043aea001283). At mainnet, swap to
+ * the production FT by updating TOKEN_REGISTRY.mockft.ftAddress.
  *
- * Key differences from EVM adapters:
- *   - wrap() signature has BOTH grossAmount and netAmount (explicit safety check)
- *   - Proofs use v0.3 circuit ceremony zkeys (same as EVM — shared ceremonies)
- *   - Proof packing: applyPiBSwap REQUIRED for Cadence's _verifyGroth16 call
- *   - UFix64 amounts: divide by 10^8 to get UFix64 string for FCL args
- *   - Addresses are Cadence hex addresses (0x7-prefix), not EVM hex
+ * v0.7 aggregate-pedersen changes (deployed 2026-06-05 at 0xc4e8f99915893a2f):
+ *   - wrap() now calls wrapWithProof() with split pA/pB/pC + anti-replay nonce
+ *   - pA/pB/pC passed in NATURAL SNARKJS ORDER — JanusFT does the pB Fp2-swap internally
+ *   - AmountDisclose circuit: 4 public inputs [grossAmount, commitX, commitY, nonce]
+ *   - Anti-replay nonces tracked in CommitmentRegistry.usedNonces (per-registry dict)
+ *   - Proof circuit: aggregate ceremony zkeys (same as JanusFlow / JanusERC20)
  *
- * Selector trap: Cadence's cross-VM calldata for EVM selectors uses CANONICAL
- * uint256[N] form (not uint[N]). The deployed JanusFT hardcodes the correct
- * selectors. The SDK does NOT build cross-VM calldata here — it calls Cadence
- * transactions directly which handle the selector internally.
+ * UFix64 amounts: raw bigint / 10^8 = UFix64 string for FCL args (UFIX64_SCALE).
+ * Addresses: Cadence hex addresses (0x-prefix), not EVM hex.
  *
- * EVM-side reads (commitment, memoKey): JanusFT reads from Cadence scripts.
+ * EVM-side reads (memoKey): via shared MemoKeyRegistry at MEMO_REGISTRY_ADDRESS.
+ * Cadence-side reads (commitment, balance): via Cadence scripts on JanusFT.
  */
 
 import type { JanusTokenAdapter, EVMSigner } from "./JanusTokenAdapter";
@@ -53,9 +53,49 @@ import {
   scanCadenceIncomingNotes,
 } from "../scan/cadence-scanner";
 
-// Cadence transaction templates for JanusFT v0.6
-// These templates use the contract at the configured cadenceAddress.
+// ---------------------------------------------------------------------------
+// Proof splitting helpers for Cadence vs EVM paths
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a ProofUint256 (uint256[8], pB already Fp2-swapped) into the pA/pB/pC
+ * triple expected by JanusFT.wrapWithProof. The Cadence contract takes pB in
+ * NATURAL SNARKJS ORDER and does the Fp2-swap internally, so we must UN-swap
+ * here (reverse what applyPiBSwap did).
+ *
+ * ProofUint256 layout:
+ *   [pA[0], pA[1], pB[0][1], pB[0][0], pB[1][1], pB[1][0], pC[0], pC[1]]
+ *   indices 2..5 are pB in EVM (swapped) order.
+ *
+ * For Cadence we restore natural snarkjs pB order:
+ *   pB = [[pi_b[0][0], pi_b[0][1]], [pi_b[1][0], pi_b[1][1]]]
+ *       = [[proof[3],  proof[2]],   [proof[5],   proof[4]]]
+ */
+function splitProofForCadence(proof: ProofUint256 | readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]): {
+  pA: [bigint, bigint];
+  pB: [[bigint, bigint], [bigint, bigint]];
+  pC: [bigint, bigint];
+} {
+  return {
+    pA: [proof[0], proof[1]],
+    // Reverse the Fp2-swap: proof[2]=pB[0][1], proof[3]=pB[0][0] → natural [proof[3], proof[2]]
+    pB: [
+      [proof[3], proof[2]],
+      [proof[5], proof[4]],
+    ],
+    pC: [proof[6], proof[7]],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cadence transaction templates for JanusFT v0.7 (aggregate-pedersen).
+// These templates mirror the production transactions in openjanus-contracts/packages/janus-ft/transactions/.
 // The underlying FT (MockFT for testnet) is imported inline where needed.
+//
+// Proof convention for wrapWithProof:
+//   pA/pB/pC are passed in NATURAL SNARKJS ORDER — the Cadence contract does the
+//   pB Fp2-swap internally before forwarding to the EVM verifier.
+//   shieldedTransfer / unwrap take a flat [UInt256; 8] with pB PRE-SWAPPED (EVM order).
 
 function buildWrapTx(contractAddr: string, ftContractName: string, ftAddress: string): string {
   return `
@@ -67,57 +107,50 @@ import EVM from 0x8c5303eaa26202d6
 transaction(
   registryAddr: Address,
   grossAmount: UFix64,
-  netAmount: UFix64,
-  txCommitX: UInt256, txCommitY: UInt256,
-  amountProof: [UInt256],
-  amountPublicInputs: [UInt256],
+  nonce: UInt256,
+  commitX: UInt256, commitY: UInt256,
+  pA: [UInt256],
+  pB: [[UInt256]],
+  pC: [UInt256],
   encryptedSnapshot: [UInt8],
-  ephPubX: UInt256, ephPubY: UInt256
+  ephPubkeyX: UInt256, ephPubkeyY: UInt256
 ) {
   let depositVault: @{FungibleToken.Vault}
   let registryRef: &JanusFT.CommitmentRegistry
   let senderAddress: Address
   let coa: auth(EVM.Call) &EVM.CadenceOwnedAccount
 
-  prepare(signer: auth(BorrowValue, SaveValue, IssueStorageCapabilityController, PublishCapability) &Account) {
+  prepare(signer: auth(BorrowValue) &Account) {
     self.senderAddress = signer.address
-
-    // Idempotent CommitmentRegistry setup — first-time MockFT users get
-    // it auto-installed; existing users skip cleanly.
-    if signer.storage.borrow<&JanusFT.CommitmentRegistry>(
-      from: JanusFT.CommitmentRegistryStoragePath
-    ) == nil {
-      let emptyVault <- ${ftContractName}.createEmptyVault(
-        vaultType: Type<@${ftContractName}.Vault>()
-      )
-      let registry <- JanusFT.createRegistry(vault: <-emptyVault)
-      signer.storage.save(<-registry, to: JanusFT.CommitmentRegistryStoragePath)
-    }
 
     let userVault = signer.storage.borrow<auth(FungibleToken.Withdraw) &${ftContractName}.Vault>(
       from: ${ftContractName}.VaultStoragePath
     ) ?? panic("wrap_ft: signer has no ${ftContractName} vault")
     self.depositVault <- userVault.withdraw(amount: grossAmount)
+
     self.registryRef = signer.storage.borrow<&JanusFT.CommitmentRegistry>(
       from: JanusFT.CommitmentRegistryStoragePath
-    ) ?? panic("wrap_ft: registry borrow failed after idempotent setup")
+    ) ?? panic("wrap_ft: signer must hold the JanusFT registry")
+
     self.coa = signer.storage.borrow<auth(EVM.Call) &EVM.CadenceOwnedAccount>(
       from: /storage/evm
-    ) ?? panic("wrap_ft: no COA at /storage/evm")
+    ) ?? panic("wrap_ft: no COA at /storage/evm — run setup_coa first")
   }
 
   execute {
-    self.registryRef.wrap(
-      account: self.senderAddress,
-      netAmount: netAmount,
-      depositVault: <- self.depositVault,
-      txCommit: JanusFT.Commitment(x: txCommitX, y: txCommitY),
-      amountProof: amountProof,
-      amountPublicInputs: amountPublicInputs,
+    self.registryRef.wrapWithProof(
+      account:           self.senderAddress,
+      nonce:             nonce,
+      commitX:           commitX,
+      commitY:           commitY,
+      pA:                pA,
+      pB:                pB,
+      pC:                pC,
       encryptedSnapshot: encryptedSnapshot,
-      ephPubX: ephPubX,
-      ephPubY: ephPubY,
-      coa: self.coa
+      ephPubkeyX:        ephPubkeyX,
+      ephPubkeyY:        ephPubkeyY,
+      vault:             <- self.depositVault,
+      coa:               self.coa
     )
   }
 }
@@ -224,16 +257,47 @@ transaction(
 }
 
 function buildPublishMemoKeyTx(contractAddr: string): string {
-  // JanusFT delegates to the shared JanusFlow.MemoKey resource at
-  // /storage/openjanusMemoKey — publishing once makes the pubkey readable
-  // from all Janus Cadence apps.
+  // Publishes the BabyJub memo pubkey to BOTH:
+  //   1. Cadence /storage/openjanusMemoKey (shared with JanusFlow.MemoKey — one path, all Cadence tokens)
+  //   2. EVM MemoKeyRegistry (0x05D104962ff087441f26BA11A1E1C3b9E091D663) via COA cross-VM call
+  //
+  // After this single transaction the user's memo key is available from ALL
+  // four Janus token adapters (flow/wflow/mockusdc via EVM registry, ft/mockft via Cadence).
   return `
 import JanusFT from ${contractAddr}
 import JanusFlow from 0x5dcbeb41055ec57e
+import EVM from 0x8c5303eaa26202d6
 
-transaction(pubkeyX: UInt256, pubkeyY: UInt256) {
-  prepare(signer: auth(SaveValue, LoadValue, IssueStorageCapabilityController, PublishCapability, UnpublishCapability) &Account) {
-    JanusFT.publishMemoKey(account: signer, pubkeyX: pubkeyX, pubkeyY: pubkeyY)
+transaction(memoPubX: UInt256, memoPubY: UInt256) {
+  prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, PublishCapability, SaveValue, Storage) &Account) {
+    JanusFT.publishMemoKey(account: signer, pubkeyX: memoPubX, pubkeyY: memoPubY)
+    log("Cadence MemoKey published at /storage/openjanusMemoKey")
+
+    let coa = signer.storage
+      .borrow<auth(EVM.Call) &EVM.CadenceOwnedAccount>(from: /storage/evm)
+      ?? panic("No COA at /storage/evm")
+
+    let memoRegistryAddr = EVM.addressFromString("0x05D104962ff087441f26BA11A1E1C3b9E091D663")
+
+    let calldata = EVM.encodeABIWithSignature(
+      "publishMemoKey(uint256,uint256)",
+      [memoPubX, memoPubY]
+    )
+
+    let result = coa.call(
+      to: memoRegistryAddr,
+      data: calldata,
+      gasLimit: 100000,
+      value: EVM.Balance(attoflow: 0)
+    )
+
+    assert(
+      result.status == EVM.Status.successful,
+      message: "EVM MemoKeyRegistry.publishMemoKey failed — errorCode: "
+        .concat(result.errorCode.toString())
+        .concat(" ")
+        .concat(result.errorMessage)
+    )
   }
 }
 `;
@@ -248,7 +312,7 @@ export interface FTWrapViaCoaPrebuiltProof {
   txCommit: readonly [bigint, bigint];
   blinding: bigint;
   nonce: bigint;
-  /** [netAmount, Cx, Cy, nonce] — 4 signals (aggregate circuit). */
+  /** [grossAmount, commitX, commitY, nonce] — 4 signals (aggregate AmountDisclose circuit). */
   publicInputs: readonly [bigint, bigint, bigint, bigint];
 }
 
@@ -481,6 +545,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       publicInputs: params.prebuiltProof.publicInputs,
     });
 
+    const { pA, pB, pC } = splitProofForCadence(orch.amountProof);
     const cadence = buildWrapTx(this.entry.cadenceAddress, this.entry.ftContractName, this.entry.ftAddress);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const txId: string = await fcl.mutate({
@@ -489,11 +554,12 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       args: (arg: any, types: any) => [
         arg(params.userCadenceAddr, types.Address),
         arg(rawToUFix64(params.grossAmount), types.UFix64),
-        arg(rawToUFix64(netAmount), types.UFix64),
+        arg(orch.nonce.toString(), types.UInt256),
         arg(orch.txCommit[0].toString(), types.UInt256),
         arg(orch.txCommit[1].toString(), types.UInt256),
-        arg(orch.amountProof.map((v) => v.toString()), types.Array(types.UInt256)),
-        arg(orch.amountPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(pA.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(pB.map((row) => row.map((v) => v.toString())), types.Array(types.Array(types.UInt256))),
+        arg(pC.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
         arg(orch.ephPubkeyX.toString(), types.UInt256),
         arg(orch.ephPubkeyY.toString(), types.UInt256),
@@ -644,14 +710,13 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
     const fcl = await this._fcl();
     const t = await this._fclTypes();
     const bps = await this.feeBps();
-    const fee = bps === 0 ? 0n : (params.grossAmount * BigInt(bps)) / 10000n;
-    const netAmount = params.grossAmount - fee;
 
-    // We need the signer's cadence address for the registry
-    // In practice the FCL authorized account is the signer
-    const signerCadenceAddr = this.entry.cadenceAddress; // TODO: get from FCL currentUser in frontend
+    // signerCadenceAddr: the FCL-authorized account is the signer. In browser contexts
+    // this matches the connected wallet. The adapter uses cadenceAddress as a placeholder
+    // for Node.js automation; in production frontends, pass userCadenceAddr via wrapViaCoa.
+    const signerCadenceAddr = this.entry.cadenceAddress;
 
-    // Need a memoKey to encrypt snapshot — for now read from chain
+    // Read memoKey from EVM registry — the COA address is the identity used by all Janus adapters.
     const memoKey = await this.getMemoKey(signerCadenceAddr);
     if (!memoKey) throw new Error("JanusFTAdapter.wrap: signer has no memoKey");
 
@@ -661,6 +726,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
     });
 
+    const { pA, pB, pC } = splitProofForCadence(orch.amountProof);
     const cadence = buildWrapTx(this.entry.cadenceAddress, this.entry.ftContractName, this.entry.ftAddress);
     const txId: string = await fcl.mutate({
       cadence,
@@ -668,11 +734,12 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       args: (arg: any, types: any) => [
         arg(signerCadenceAddr, types.Address),
         arg(rawToUFix64(params.grossAmount), types.UFix64),
-        arg(rawToUFix64(netAmount), types.UFix64),
+        arg(orch.nonce.toString(), types.UInt256),
         arg(orch.txCommit[0].toString(), types.UInt256),
         arg(orch.txCommit[1].toString(), types.UInt256),
-        arg(orch.amountProof.map((v) => v.toString()), types.Array(types.UInt256)),
-        arg(orch.amountPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(pA.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(pB.map((row) => row.map((v) => v.toString())), types.Array(types.Array(types.UInt256))),
+        arg(pC.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
         arg(orch.ephPubkeyX.toString(), types.UInt256),
         arg(orch.ephPubkeyY.toString(), types.UInt256),
@@ -709,8 +776,8 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       args: (arg: any, types: any) => [
         arg(signerCadenceAddr, types.Address),
         arg(params.recipient, types.Address),
-        arg(orch.publicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(orch.proof.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(orch.publicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
         arg(orch.ephPubkeyX.toString(), types.UInt256),
         arg(orch.ephPubkeyY.toString(), types.UInt256),
@@ -749,8 +816,8 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
         arg(orch.txCommit[1].toString(), types.UInt256),
         arg(orch.amountProof.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(orch.amountPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
-        arg(orch.transferPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(orch.transferProof.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(orch.transferPublicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
         arg(Array.from(orch.encryptedSnapshot).map(String), types.Array(types.UInt8)),
         arg(orch.ephPubkeyX.toString(), types.UInt256),
         arg(orch.ephPubkeyY.toString(), types.UInt256),
