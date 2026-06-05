@@ -16,7 +16,7 @@
  *   snarkjs export calldata format: G2 in Fq2 with Fp2 coordinates reversed
  */
 
-import type { SnarkJSProof, EVMProof } from "../types/proof";
+import type { SnarkJSProof, EVMProof, ProofUint256 } from "../types/proof";
 
 /**
  * Apply the EIP-197 Fp2 coordinate swap to a snarkJS proof.
@@ -55,4 +55,25 @@ export function evmProofToUint256Array(
     evmProof.pC[0],
     evmProof.pC[1],
   ];
+}
+
+/**
+ * Split a ProofUint256 (uint256[8]) back into separate pA, pB, pC components
+ * for contract ABIs that take the proof split (not packed).
+ *
+ * wrapWithProof ABI: (nonce, commit[2], pA[2], pB[2][2], pC[2], ...)
+ */
+export function splitProof(proof: ProofUint256 | readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]): {
+  pA: [bigint, bigint];
+  pB: [[bigint, bigint], [bigint, bigint]];
+  pC: [bigint, bigint];
+} {
+  return {
+    pA: [proof[0], proof[1]],
+    pB: [
+      [proof[2], proof[3]],
+      [proof[4], proof[5]],
+    ],
+    pC: [proof[6], proof[7]],
+  };
 }

@@ -3,8 +3,8 @@
  *
  * Sequence:
  *   1. Read feeBps from contract.
- *   2. Build AmountDisclose proof for claimedAmount (the FULL debit from commitment).
- *   3. Build ConfidentialTransfer proof for the residual (new commitment after debit).
+ *   2. Build AmountDisclose proof for claimedAmount + nonce (the FULL debit).
+ *   3. Build ConfidentialTransfer proof for the residual.
  *   4. Encrypt residual snapshot to sender's memokey.
  *   5. Return all params.
  *
@@ -28,16 +28,19 @@ export interface UnwrapOrchestrateInput {
   currentBalance: bigint;
   currentBlinding: bigint;
   senderMemoKeypair: BabyJubKeypair;
+  /** Anti-replay nonce for the unwrap amount-disclose proof. */
+  nonce?: bigint;
 }
 
 export interface UnwrapOrchestrateResult {
   claimedAmount: bigint;
   netToRecipient: bigint;
   fee: bigint;
+  nonce: bigint;
   txCommit: readonly [bigint, bigint];
   amountProof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
-  /** Amount-disclose public inputs [claimed_amount, Cx, Cy] — pass to JanusFT.unwrap(). */
-  amountPublicInputs: readonly [bigint, bigint, bigint];
+  /** Amount-disclose public inputs [amount, Cx, Cy, nonce] — 4 signals. */
+  amountPublicInputs: readonly [bigint, bigint, bigint, bigint];
   transferPublicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
   transferProof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
   encryptedSnapshot: Uint8Array;
@@ -51,7 +54,6 @@ export interface UnwrapOrchestrateResult {
 /**
  * Input for orchestrateUnwrapWithPrebuiltProofs.
  * Browser callers POST to /api/proof/unwrap and receive both proofs.
- * transferBlinding is generated client-side before the API call.
  */
 export interface UnwrapOrchestratePrebuiltInput {
   claimedAmount: bigint;
@@ -62,21 +64,20 @@ export interface UnwrapOrchestratePrebuiltInput {
   amountProof: ProofUint256;
   /** AmountDisclose txCommit [Cx, Cy]. */
   txCommit: readonly [bigint, bigint];
-  /** AmountDisclose publicInputs [claimed_amount, Cx, Cy]. */
-  amountPublicInputs: readonly [bigint, bigint, bigint];
+  /** AmountDisclose publicInputs [amount, Cx, Cy, nonce] — 4 signals. */
+  amountPublicInputs: readonly [bigint, bigint, bigint, bigint];
   /** ConfidentialTransfer proof (uint256[8]) for the residual spend. */
   transferProof: ProofUint256;
   /** ConfidentialTransfer publicInputs [C_old.x,y, C_tx.x,y, C_new.x,y]. */
   transferPublicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
   /** New blinding for the residual commitment (needed for snapshot encryption). */
   newBlinding: bigint;
+  /** Nonce used in the amount-disclose proof. */
+  nonce: bigint;
 }
 
 /**
  * Orchestrate an unwrap with pre-built proofs (browser-safe path).
- *
- * Skips both proof builders (Node.js only). Performs only snapshot
- * encryption (pure ECIES crypto, browser-safe).
  */
 export async function orchestrateUnwrapWithPrebuiltProofs(
   input: UnwrapOrchestratePrebuiltInput
@@ -92,6 +93,7 @@ export async function orchestrateUnwrapWithPrebuiltProofs(
     transferProof,
     transferPublicInputs,
     newBlinding,
+    nonce,
   } = input;
 
   if (claimedAmount <= 0n) {
@@ -119,6 +121,7 @@ export async function orchestrateUnwrapWithPrebuiltProofs(
     claimedAmount,
     netToRecipient,
     fee,
+    nonce,
     txCommit,
     amountProof,
     amountPublicInputs,
@@ -153,17 +156,21 @@ export async function orchestrateUnwrap(
   const fee = feeBps === 0 ? 0n : (claimedAmount * BigInt(feeBps)) / 10000n;
   const netToRecipient = claimedAmount - fee;
 
-  // 2. Fresh blindings
+  // 2. Resolve nonce
+  const nonce = input.nonce ?? BigInt(Date.now());
+
+  // 3. Fresh blindings
   const transferBlinding = generateBlinding();
   const newBlinding = generateBlinding();
 
-  // 3. AmountDisclose proof for claimedAmount (FULL debit, not net)
+  // 4. AmountDisclose proof for claimedAmount (FULL debit, not net)
   const amountProofResult = await buildAmountDiscloseProof({
     amount: claimedAmount,
     blinding: transferBlinding,
+    nonce,
   });
 
-  // 4. ConfidentialTransfer proof for the residual
+  // 5. ConfidentialTransfer proof for the residual
   const newBalance = currentBalance - claimedAmount;
   const transferProofResult = await buildShieldedTransferProof({
     oldBalance: currentBalance,
@@ -173,7 +180,7 @@ export async function orchestrateUnwrap(
     newBlinding,
   });
 
-  // 5. Encrypt residual snapshot
+  // 6. Encrypt residual snapshot
   const nowMs = Date.now();
   const snapshotEnc = await encryptSnapshot(
     { balance: newBalance, blinding: newBlinding, timestampMs: nowMs },
@@ -184,6 +191,7 @@ export async function orchestrateUnwrap(
     claimedAmount,
     netToRecipient,
     fee,
+    nonce,
     txCommit: amountProofResult.txCommit,
     amountProof: amountProofResult.proof,
     amountPublicInputs: amountProofResult.publicInputs,

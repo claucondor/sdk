@@ -147,8 +147,7 @@ export {
 } from "./crypto/fee-math";
 
 // Pedersen commitment helpers
-export { computeCommitmentV05 as computeCommitment } from "./primitives/pedersen";
-export { addCommitmentsLocal, subCommitmentsLocal } from "./primitives/pedersen";
+export { computeCommitment, addCommitmentsLocal, subCommitmentsLocal } from "./primitives/pedersen";
 
 // COA helpers (for cross-VM setup)
 export {

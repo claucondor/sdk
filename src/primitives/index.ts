@@ -29,11 +29,10 @@ export type { BabyJubContractOptions } from "./babyjub";
 
 // Pedersen commitments
 export {
-  PEDERSEN_CADENCE_ADDRESS,
   BABYJUB_EVM_ADDRESS,
+  BABYJUB_SUBGROUP_ORDER,
   FLOW_TESTNET_ACCESS_NODE,
   computeCommitment,
-  computeCommitmentV05,
   addCommitmentsLocal,
   subCommitmentsLocal,
   negateCommitment,

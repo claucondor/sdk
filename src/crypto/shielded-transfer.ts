@@ -1,42 +1,33 @@
 /**
  * crypto/shielded-transfer.ts — buildShieldedTransferProof
  *
- * Generates the v0.3 ConfidentialTransfer Groth16 proof that gates
+ * Generates the aggregate ConfidentialTransfer Groth16 proof that gates
  * JanusToken.shieldedTransfer (amount HIDDEN on calldata, events, storage).
  *
- * Circuit (confidential_transfer.circom):
- *   private inputs: old_value, old_blinding, transfer_value,
- *                   transfer_blinding, new_blinding
+ * Circuit (confidential_transfer_aggregate.circom):
+ *   private inputs: old_value (128-bit), old_blinding (252-bit),
+ *                   transfer_value (128-bit), transfer_blinding (252-bit),
+ *                   new_blinding (252-bit)
  *   public inputs : old_commit[2], transfer_commit[2], new_commit[2]
- *   asserts       : commitments are consistent Pedersen of (value, blinding)
+ *   asserts       : all three commits consistent via 2-gen Pedersen
  *                   transfer_value <= old_value (underflow prevention)
- *                   transfer_value in [0, 2^128) (range check via Num2Bits — bumped from 2^64 in v0.5)
+ *                   all values in [0, 2^128)
  *
- * publicSignals order:
+ * Public input layout (unchanged from v0.6 — adapters need no change):
  *   [0..1] old_commit (C_old)
  *   [2..3] transfer_commit (C_tx)
  *   [4..5] new_commit (C_new)
- *
- * The SDK is generic — apps decide how to materialize old_blinding and how
- * to track new_blinding for the next transfer. The caller MUST persist
- * new_blinding (paired with the new value) for any future spend.
- *
- * Trusted setup (v0.3): see lab `cadence-crypto-lab/modules/zk/confidential-transfer-circuit`.
  */
 
 import { applyPiBSwap, evmProofToUint256Array } from "../utils/pi-b-swap.js";
 import { computeCommitment } from "../primitives/pedersen.js";
 import type { Point } from "../types/commitment.js";
 import type { SnarkJSProof, ProofUint256 } from "../types/proof.js";
+import { SUBORDER } from "@openjanus/commitment";
 
 // ---------------------------------------------------------------------------
 // Bundled circuit artifact paths — RESOLVED LAZILY (Node-only)
 // ---------------------------------------------------------------------------
-// We defer the `url`/`path` imports so that browser bundlers (Webpack/Vite)
-// don't fail at parse time on `fileURLToPath`. Browser callers can import
-// memo-encryption helpers from the same crypto barrel without crashing;
-// proof generation is server-only and throws a clear error if invoked in
-// a browser context.
 
 interface CircuitPaths {
   wasm: string;
@@ -59,8 +50,8 @@ async function getCircuitPaths(): Promise<CircuitPaths> {
   const __dirname = dirname(__filename);
   const PACKAGE_ROOT = resolve(__dirname, "..", "..");
   _circuitPaths = {
-    wasm: resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer.wasm"),
-    zkey: resolve(PACKAGE_ROOT, "circuits/v0.3/confidential_transfer_final.zkey"),
+    wasm: resolve(PACKAGE_ROOT, "circuits/aggregate/confidential_transfer_aggregate.wasm"),
+    zkey: resolve(PACKAGE_ROOT, "circuits/aggregate/confidential_transfer_aggregate_test.zkey"),
   };
   return _circuitPaths;
 }
@@ -72,13 +63,13 @@ async function getCircuitPaths(): Promise<CircuitPaths> {
 export interface ShieldedTransferProofInput {
   /** Sender's current cleartext balance (must equal old_commit's value). */
   oldBalance: bigint;
-  /** Blinding factor of the sender's current commit (stored locally). */
+  /** Blinding scalar of the sender's current commit (252-bit, mod SUBORDER). */
   oldBlinding: bigint;
-  /** Amount to transfer (must be <= oldBalance, in [0, 2^64)). */
+  /** Amount to transfer (must be <= oldBalance, in [0, 2^128)). */
   transferAmount: bigint;
-  /** Fresh 128-bit blinding for the transfer commitment. */
+  /** Fresh 252-bit blinding for the transfer commitment. */
   transferBlinding: bigint;
-  /** Fresh 128-bit blinding for the sender's NEW (residual) commitment. */
+  /** Fresh 252-bit blinding for the sender's NEW (residual) commitment. */
   newBlinding: bigint;
 }
 
@@ -110,18 +101,16 @@ export interface ProofArtifactOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Generate the v0.3 ConfidentialTransfer Groth16 proof.
+ * Generate the aggregate ConfidentialTransfer Groth16 proof.
  *
- * Off-chain we compute all three Pedersen commitments and feed them as
- * public inputs. The circuit re-derives them from the (value, blinding)
- * private inputs and asserts equality.
+ * Off-chain we compute all three 2-gen Pedersen commitments and feed them as
+ * public inputs. The circuit re-derives them from (value, blinding) private
+ * inputs and asserts equality. The homomorphism guarantees that the on-chain
+ * accumulated commitment equals Commit(Σv_i, Σr_i) — a valid old_commit that
+ * this proof can satisfy with the running sums (oldBalance, oldBlinding).
  *
- * Use this proof for JanusToken.shieldedTransfer (and the
- * transfer-half of JanusFlow.unwrap with transferAmount = claimedAmount).
- *
- * IMPORTANT: The caller MUST persist `newBlinding` paired with the new
- * residual balance — it is required to construct the next shielded transfer
- * from this account.
+ * IMPORTANT: The caller MUST persist newBlinding paired with the new residual
+ * balance — required to construct the next shielded transfer from this account.
  *
  * @param input    Transfer parameters (see ShieldedTransferProofInput)
  * @param options  Optional WASM/zkey path overrides
@@ -138,10 +127,10 @@ export async function buildShieldedTransferProof(
     zkeyPath = zkeyPath ?? paths.zkey;
   }
 
-  // Input range guards (loud failure beats silent witness rejection)
-  if (input.oldBalance < 0n || input.oldBalance >= 1n << 64n) {
+  // Input range guards — aggregate circuit uses Num2Bits(128) for values
+  if (input.oldBalance < 0n || input.oldBalance >= 1n << 128n) {
     throw new RangeError(
-      `buildShieldedTransferProof: oldBalance must be in [0, 2^64), got ${input.oldBalance}`
+      `buildShieldedTransferProof: oldBalance must be in [0, 2^128), got ${input.oldBalance}`
     );
   }
   if (input.transferAmount < 0n || input.transferAmount > input.oldBalance) {
@@ -149,14 +138,16 @@ export async function buildShieldedTransferProof(
       `buildShieldedTransferProof: transferAmount must be in [0, oldBalance], got ${input.transferAmount} (balance ${input.oldBalance})`
     );
   }
-  if (input.oldBlinding < 0n || input.oldBlinding >= 1n << 128n) {
-    throw new RangeError(`buildShieldedTransferProof: oldBlinding out of range`);
+  // Blinding scalars: aggregate circuit uses Num2Bits(252)
+  const MAX_BLINDING = (1n << 252n) - 1n;
+  if (input.oldBlinding < 0n || input.oldBlinding > MAX_BLINDING) {
+    throw new RangeError(`buildShieldedTransferProof: oldBlinding out of [0, 2^252) range`);
   }
-  if (input.transferBlinding < 0n || input.transferBlinding >= 1n << 128n) {
-    throw new RangeError(`buildShieldedTransferProof: transferBlinding out of range`);
+  if (input.transferBlinding < 0n || input.transferBlinding > MAX_BLINDING) {
+    throw new RangeError(`buildShieldedTransferProof: transferBlinding out of [0, 2^252) range`);
   }
-  if (input.newBlinding < 0n || input.newBlinding >= 1n << 128n) {
-    throw new RangeError(`buildShieldedTransferProof: newBlinding out of range`);
+  if (input.newBlinding < 0n || input.newBlinding > MAX_BLINDING) {
+    throw new RangeError(`buildShieldedTransferProof: newBlinding out of [0, 2^252) range`);
   }
 
   const newBalance = input.oldBalance - input.transferAmount;
@@ -212,3 +203,6 @@ export async function buildShieldedTransferProof(
     rawPublicSignals: publicSignals,
   };
 }
+
+// Suppress unused import warning — SUBORDER used as reference constant
+void SUBORDER;
