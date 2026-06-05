@@ -1,6 +1,6 @@
 {
   "name": "@claucondor/sdk",
-  "version": "0.6.6",
+  "version": "0.7.0",
   "description": "Multi-token privacy SDK for Flow — JanusFlow (native FLOW), JanusWFLOW (ERC20), JanusMockUSDC (ERC20), JanusFT (Cadence FT generic wrapper). Pedersen commitments, Groth16 proofs, ECIES notes+snapshots, full wrap/shieldedTransfer/unwrap orchestration. Frontend-dumb: all crypto ordering lives in the SDK.",
   "author": "oydual3 <claucondor@gmail.com>",
   "license": "MIT",
@@ -53,6 +53,7 @@
   "files": [
     "dist",
     "circuits/v0.3",
+    "circuits/aggregate",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -74,6 +75,7 @@
   "dependencies": {
     "@onflow/fcl": "^1.13.0",
     "@onflow/types": "^1.4.1",
+    "@openjanus/commitment": "file:../openjanus-primitives/packages/commitment",
     "circomlibjs": "^0.1.7",
     "ethers": "^6.13.4",
     "snarkjs": "^0.7.6"
