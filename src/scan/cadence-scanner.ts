@@ -32,8 +32,16 @@ const FLOW_EVENT_RANGE_MAX = 250; // testnet cap per /v1/events request
 // Default lookback when no fromBlock is provided. Flow testnet caps event
 // queries at 250 blocks per request, so a 250k window = ~1000 sequential
 // REST calls (slow). Callers SHOULD pass an explicit fromBlock from
-// app state (e.g. last-scanned block). 5000 = ~20 REST calls = under 30s.
-const DEFAULT_LOOKBACK = 5_000;
+// app state (e.g. last-scanned block).
+//
+// 100_000 blocks ≈ 28 hours at ~1 block/s on Flow testnet — wide enough to
+// cover any same-day wrap/transfer while keeping REST calls to ~400 per event
+// type (~3 types × 400 = ~1200 total, typically <60s).
+//
+// HISTORY: was 5_000 (≈83 min). Bumped to 100_000 on 2026-06-05 after operator
+// reported "no recoverable state" for a wrap done ~2.8h earlier (10k blocks out
+// of the old window). Root cause: DEFAULT_LOOKBACK too small.
+const DEFAULT_LOOKBACK = 100_000;
 
 interface JsonCDCValue {
   type: string;
