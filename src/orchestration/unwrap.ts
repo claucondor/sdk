@@ -13,6 +13,12 @@
  *   - netToRecipient = claimedAmount - fee.
  *   - The AmountDisclose proof binds to claimedAmount (full, NOT net).
  *   - The contract sends netToRecipient to the recipient and fee to feeRecipient.
+ *
+ * Nonce for unwrap:
+ *   JanusFlow._unwrap always calls _verifyAmountDisclose(..., nonce=0).
+ *   The unwrap nonce is NOT a per-user replay counter — it is always 0n.
+ *   Passing any value other than 0n will cause the on-chain verifier to reject
+ *   the proof (public input mismatch). Do NOT use Date.now() here.
  */
 
 import { buildAmountDiscloseProof } from "../crypto/amount-disclose";
@@ -28,7 +34,15 @@ export interface UnwrapOrchestrateInput {
   currentBalance: bigint;
   currentBlinding: bigint;
   senderMemoKeypair: BabyJubKeypair;
-  /** Anti-replay nonce for the unwrap amount-disclose proof. */
+  /**
+   * Nonce for the unwrap amount-disclose proof.
+   *
+   * MUST be `0n` (or omitted — defaults to `0n`).
+   * JanusFlow._unwrap calls `_verifyAmountDisclose(..., nonce=0)` on-chain.
+   * Any non-zero value produces a public-input mismatch and the tx reverts.
+   *
+   * @default 0n
+   */
   nonce?: bigint;
 }
 
@@ -157,7 +171,9 @@ export async function orchestrateUnwrap(
   const netToRecipient = claimedAmount - fee;
 
   // 2. Resolve nonce
-  const nonce = input.nonce ?? BigInt(Date.now());
+  // Unwrap nonce is always 0n — JanusFlow._unwrap calls _verifyAmountDisclose(..., 0).
+  // Any non-zero value causes a public-input mismatch and the verifier reverts.
+  const nonce = input.nonce ?? 0n;
 
   // 3. Fresh blindings
   const transferBlinding = generateBlinding();
