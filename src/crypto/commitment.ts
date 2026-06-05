@@ -5,9 +5,13 @@
  *  - Input validation with developer-friendly error messages
  *  - Brute-force balance decryption (for testing only)
  *  - Random blinding factor generation
+ *
+ * v0.7: generateBlinding produces a full 252-bit scalar (SUBORDER range)
+ * to match the aggregate circuit's blinding constraint (Num2Bits(252)).
  */
 
 import type { CommitmentXY } from "../types/commitment";
+import { SUBORDER } from "@openjanus/commitment";
 import {
   computeCommitment,
   addCommitmentsLocal,
@@ -26,28 +30,38 @@ export {
 } from "../primitives/pedersen";
 
 /**
- * Generate a cryptographically random 128-bit blinding factor.
+ * Generate a cryptographically random blinding scalar in [1, SUBORDER).
+ *
+ * v0.7: generates a full 252-bit scalar to match the aggregate circuit's
+ * Num2Bits(252) blinding constraint. The prior 128-bit range was too narrow
+ * for accumulated blindings from multiple received notes.
  *
  * IMPORTANT: Store this value. You need it to:
  *   - Decrypt your balance (prove you own a commitment)
  *   - Generate ZK proofs for transfers
  */
 export function generateBlinding(): bigint {
-  const bytes = new Uint8Array(16);
+  // Generate 32 random bytes (256 bits), reduce mod SUBORDER to stay in range,
+  // ensure non-zero (SUBORDER is ~252 bits so mod rarely produces 0).
+  const bytes = new Uint8Array(32);
   if (typeof globalThis.crypto !== "undefined") {
     globalThis.crypto.getRandomValues(bytes);
   } else {
     // Node.js fallback
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { randomBytes } = require("crypto") as typeof import("crypto");
-    const rand = randomBytes(16);
-    for (let i = 0; i < 16; i++) bytes[i] = rand[i];
+    const rand = randomBytes(32);
+    for (let i = 0; i < 32; i++) bytes[i] = rand[i];
   }
 
-  let blinding = 0n;
-  for (let i = 0; i < 16; i++) {
-    blinding = (blinding << 8n) | BigInt(bytes[i]);
+  let scalar = 0n;
+  for (let i = 0; i < 32; i++) {
+    scalar = (scalar << 8n) | BigInt(bytes[i]);
   }
+
+  // Reduce mod SUBORDER, ensure non-zero
+  let blinding = scalar % SUBORDER;
+  if (blinding === 0n) blinding = 1n;
   return blinding;
 }
 
