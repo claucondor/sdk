@@ -7,4 +7,4 @@
 
 export { bigintToHex, hexToBigint, padHex, decimalToBigint } from "./hex";
 export { applyPiBSwap, evmProofToUint256Array } from "./pi-b-swap";
-export { formatPoint, isValidFlowAddress, isValidFlowAmount } from "./format";
+export { formatPoint, isValidFlowAddress, isValidFlowAmount, bigintReplacer } from "./format";

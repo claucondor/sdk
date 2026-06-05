@@ -122,6 +122,9 @@ export type { ShieldedTransferProofInput, ShieldedTransferProofResult } from "./
 // Pi-b swap (required for snarkjs→EVM and snarkjs→Cadence proof packing)
 export { applyPiBSwap, evmProofToUint256Array } from "./utils/pi-b-swap";
 
+// JSON serialization helper — use with JSON.stringify to handle BigInt fields
+export { bigintReplacer } from "./utils/format";
+
 // Network helpers
 export { createEvmProvider, createEvmWallet, configureFCL, NETWORK_CONFIG } from "./network/flow-client";
 export type { FlowNetwork } from "./network/flow-client";

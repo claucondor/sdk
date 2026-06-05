@@ -28,6 +28,9 @@ export const TOKEN_REGISTRY = {
   mockusdc: {
     variant: "erc20",
     proxy: "0xD5E6a52635599E6B2296B5BfEeC617E333561ea0",
+    // JanusERC20_impl: 0xBbF98D59825730F421DA406c6DDbeBe16860fe27 (post-fix deploy 2026-06-04)
+    // Original impl had underlying=address(0); fixed by deploying new impl with
+    // reinitializeUnderlying(address) and upgrading via admin COA.
     underlying: "0x686E8d90A7B608540cAF46E527fD8a5631A1b658", // MockUSDC
     decimals: 6,
   } satisfies ERC20TokenEntry,
