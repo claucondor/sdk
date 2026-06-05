@@ -1,8 +1,10 @@
 # @claucondor/sdk
 
-Multi-token privacy SDK for Flow. Version: **v0.6.5**.
+Multi-token privacy SDK for Flow. Version: **v0.7.4**.
 
 Send FLOW, WFLOW, MockUSDC, or MockFT (via JanusFT generic Cadence wrapper) shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
+
+**v0.7.4**: Nonces for `orchestrateWrap` are now generated as cryptographically random 256-bit values via `@noble/hashes`. No localStorage state needed — works across devices and sessions with negligible (1/2^256) collision probability. If you need deterministic behaviour (tests, replay), pass `nonce` explicitly in `WrapOrchestrateInput`.
 
 **v0.6.4**: `JanusFT` generic Cadence wrapper — production-grade, underlying-agnostic. Real cross-VM BabyJub + Groth16 ZK (no stubs). MockFT is the testnet underlying.
 
