@@ -1,15 +1,14 @@
 /**
- * adapters/janus-erc20.ts — JanusTokenAdapter for variant="erc20" (v0.6.3+).
+ * adapters/janus-erc20.ts — JanusTokenAdapter for variant="erc20" (v0.7+).
  *
  * Wraps an ERC20 underlying via approve+transferFrom (non-payable wrap).
  * Parameterized by TOKEN_REGISTRY entry — one instance per proxy.
  *
- * v0.6.3 change: MemoKey reads/writes now go through the shared MemoKeyRegistry
- * (MEMO_REGISTRY_ADDRESS). publishMemoKey sends a tx to the registry; getMemoKey
- * reads from the registry. The token proxy no longer manages memo keys.
+ * v0.7 change: wrap() now calls wrapWithProof() with split pA/pB/pC proof
+ * and a nonce for anti-replay protection (aggregate 2-gen Pedersen circuit).
  *
- * wrap() signature:
- *   wrap(uint256 amount, uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external
+ * wrapWithProof() signature:
+ *   wrapWithProof(uint256 amount, uint256 nonce, uint256[2] commit, uint256[2] pA, uint256[2][2] pB, uint256[2] pC, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external
  *
  * GROSS amount is passed as `amount`. SDK computes net and builds proof for net.
  * Caller must pre-approve underlying for grossAmount before calling wrap().
@@ -35,6 +34,7 @@ import type { ProofUint256 } from "../types/proof";
 import type { ERC20TokenEntry } from "../types";
 import { FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS } from "../network/contracts";
 import { orchestrateWrap, orchestrateWrapWithPrebuiltProof } from "../orchestration/wrap";
+import { splitProof } from "../utils/pi-b-swap";
 import { orchestrateShieldedTransfer, orchestrateShieldedTransferWithPrebuiltProof } from "../orchestration/shielded-transfer";
 import { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "../orchestration/unwrap";
 
@@ -47,7 +47,9 @@ export interface WrapViaCoaPrebuiltProofERC20 {
   proof: ProofUint256;
   txCommit: readonly [bigint, bigint];
   blinding: bigint;
-  publicInputs: readonly [bigint, bigint, bigint];
+  nonce: bigint;
+  /** Public inputs [netAmount, Cx, Cy, nonce] — 4 signals (aggregate circuit). */
+  publicInputs: readonly [bigint, bigint, bigint, bigint];
 }
 
 export interface ShieldedTransferViaCoaPrebuiltProofERC20 {
@@ -60,10 +62,12 @@ export interface ShieldedTransferViaCoaPrebuiltProofERC20 {
 export interface UnwrapViaCoaPrebuiltProofsERC20 {
   amountProof: ProofUint256;
   txCommit: readonly [bigint, bigint];
-  amountPublicInputs: readonly [bigint, bigint, bigint];
+  /** [claimedAmount, Cx, Cy, nonce] — 4 signals. */
+  amountPublicInputs: readonly [bigint, bigint, bigint, bigint];
   transferProof: ProofUint256;
   transferPublicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
   newBlinding: bigint;
+  nonce: bigint;
 }
 import { decryptSnapshot } from "../crypto/snapshot-schema";
 import { decryptNote } from "../crypto/note-schema";
@@ -71,7 +75,7 @@ import { scanIncomingNotes } from "../scan/event-scanner";
 import { getLatestSnapshot } from "../scan/latest-snapshot";
 
 const ERC20_JANUS_ABI = [
-  "function wrap(uint256 amount, uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
+  "function wrapWithProof(uint256 amount, uint256 nonce, uint256[2] commit, uint256[2] pA, uint256[2][2] pB, uint256[2] pC, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
   "function shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY) external",
   "function unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
   "function feeBps() view returns (uint16)",
@@ -210,11 +214,15 @@ export class JanusERC20Adapter implements JanusTokenAdapter {
       senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
     });
 
+    const { pA, pB, pC } = splitProof(orch.amountProof);
     const contract = this._rw(signer);
-    const tx = await contract.wrap(
+    const tx = await contract.wrapWithProof(
       params.grossAmount,
+      orch.nonce,
       [orch.txCommit[0], orch.txCommit[1]],
-      [...orch.amountProof],
+      pA,
+      pB,
+      pC,
       ethers.hexlify(orch.encryptedSnapshot),
       orch.ephPubkeyX,
       orch.ephPubkeyY
@@ -264,6 +272,7 @@ export class JanusERC20Adapter implements JanusTokenAdapter {
           proof: params.prebuiltProof.proof,
           txCommit: params.prebuiltProof.txCommit,
           blinding: params.prebuiltProof.blinding,
+          nonce: params.prebuiltProof.nonce,
           publicInputs: params.prebuiltProof.publicInputs,
         })
       : await orchestrateWrap({
@@ -279,12 +288,16 @@ export class JanusERC20Adapter implements JanusTokenAdapter {
       params.grossAmount,
     ]).slice(2); // strip 0x
 
-    // ABI-encode JanusERC20.wrap(amount, txCommit[2], proof[8], snapshot, ephX, ephY)
+    // ABI-encode JanusERC20.wrapWithProof(amount, nonce, commit, pA, pB, pC, snapshot, ephX, ephY)
+    const { pA, pB, pC } = splitProof(orch.amountProof);
     const wrapIface = new ethers.Interface(ERC20_JANUS_ABI);
-    const wrapCalldata = wrapIface.encodeFunctionData("wrap", [
+    const wrapCalldata = wrapIface.encodeFunctionData("wrapWithProof", [
       params.grossAmount,
+      orch.nonce,
       [orch.txCommit[0], orch.txCommit[1]],
-      [...orch.amountProof],
+      pA,
+      pB,
+      pC,
       ethers.hexlify(orch.encryptedSnapshot),
       orch.ephPubkeyX,
       orch.ephPubkeyY,
@@ -516,6 +529,7 @@ transaction(calldataHex: String, proxyHex: String) {
           transferProof: params.prebuiltProofs.transferProof,
           transferPublicInputs: params.prebuiltProofs.transferPublicInputs,
           newBlinding: params.prebuiltProofs.newBlinding,
+          nonce: params.prebuiltProofs.nonce,
         })
       : await orchestrateUnwrap({
           claimedAmount: params.claimedAmount,

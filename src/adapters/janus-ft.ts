@@ -247,7 +247,9 @@ export interface FTWrapViaCoaPrebuiltProof {
   proof: ProofUint256;
   txCommit: readonly [bigint, bigint];
   blinding: bigint;
-  publicInputs: readonly [bigint, bigint, bigint];
+  nonce: bigint;
+  /** [netAmount, Cx, Cy, nonce] — 4 signals (aggregate circuit). */
+  publicInputs: readonly [bigint, bigint, bigint, bigint];
 }
 
 /**
@@ -268,10 +270,12 @@ export interface FTShieldedTransferViaCoaPrebuiltProof {
 export interface FTUnwrapViaCoaPrebuiltProofs {
   amountProof: ProofUint256;
   txCommit: readonly [bigint, bigint];
-  amountPublicInputs: readonly [bigint, bigint, bigint];
+  /** [claimedAmount, Cx, Cy, nonce] — 4 signals. */
+  amountPublicInputs: readonly [bigint, bigint, bigint, bigint];
   transferProof: ProofUint256;
   transferPublicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
   newBlinding: bigint;
+  nonce: bigint;
 }
 
 /** Convert bigint raw amount (10^8 units) to UFix64 string "N.XXXXXXXX" */
@@ -473,6 +477,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       proof: params.prebuiltProof.proof,
       txCommit: params.prebuiltProof.txCommit,
       blinding: params.prebuiltProof.blinding,
+      nonce: params.prebuiltProof.nonce,
       publicInputs: params.prebuiltProof.publicInputs,
     });
 
@@ -604,6 +609,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       transferProof: params.prebuiltProofs.transferProof,
       transferPublicInputs: params.prebuiltProofs.transferPublicInputs,
       newBlinding: params.prebuiltProofs.newBlinding,
+      nonce: params.prebuiltProofs.nonce,
     });
 
     const cadence = buildUnwrapTx(this.entry.cadenceAddress, this.entry.ftContractName, this.entry.ftAddress);

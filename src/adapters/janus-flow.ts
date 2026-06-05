@@ -1,16 +1,14 @@
 /**
- * adapters/janus-flow.ts — JanusTokenAdapter for variant="native" (JanusFlow v0.6.3+).
+ * adapters/janus-flow.ts — JanusTokenAdapter for variant="native" (JanusFlow v0.7+).
  *
  * Wraps native FLOW via msg.value. One instance per proxy address.
  * Parameterized by TOKEN_REGISTRY entry — not a separate class per token.
  *
- * v0.6.3 change: MemoKey reads/writes now go through MemoKeyRegistry
- * (MEMO_REGISTRY_ADDRESS), NOT the per-token proxy. publishMemoKey sends
- * a tx to the registry directly. getMemoKey reads from the registry.
- * Tokens become read-only consumers of the registry.
+ * v0.7 change: wrap() now calls wrapWithProof() with split pA/pB/pC proof
+ * and a nonce for anti-replay protection (aggregate 2-gen Pedersen circuit).
  *
- * ABI surface (v0.6.3 proxy):
- *   wrap(uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable
+ * ABI surface (v0.7 proxy):
+ *   wrapWithProof(uint256 nonce, uint256[2] commit, uint256[2] pA, uint256[2][2] pB, uint256[2] pC, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable
  *   shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY) external
  *   unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external
  *   feeBps() view returns (uint16)
@@ -45,6 +43,7 @@ import type { ProofUint256 } from "../types/proof";
 import type { NativeTokenEntry } from "../types";
 import { FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS } from "../network/contracts";
 import { orchestrateWrap, orchestrateWrapWithPrebuiltProof } from "../orchestration/wrap";
+import { splitProof } from "../utils/pi-b-swap";
 
 /**
  * Pre-built proof from a server-side route (browser callers).
@@ -54,12 +53,14 @@ import { orchestrateWrap, orchestrateWrapWithPrebuiltProof } from "../orchestrat
 export interface WrapViaCoaPrebuiltProof {
   /** Groth16 proof as uint256[8] (EVM-ready, pi_b Fp2-swapped). */
   proof: ProofUint256;
-  /** Pedersen commitment point from the circuit. */
+  /** 2-gen Pedersen commitment point from the circuit. */
   txCommit: readonly [bigint, bigint];
   /** Blinding factor generated client-side before the API call. */
   blinding: bigint;
-  /** Public inputs [claimed_netAmount, Cx, Cy]. */
-  publicInputs: readonly [bigint, bigint, bigint];
+  /** Nonce used in the proof. */
+  nonce: bigint;
+  /** Public inputs [netAmount, Cx, Cy, nonce] — 4 signals (aggregate circuit). */
+  publicInputs: readonly [bigint, bigint, bigint, bigint];
 }
 
 /**
@@ -86,14 +87,16 @@ export interface UnwrapViaCoaPrebuiltProofs {
   amountProof: ProofUint256;
   /** AmountDisclose txCommit [Cx, Cy]. */
   txCommit: readonly [bigint, bigint];
-  /** AmountDisclose publicInputs [claimed_amount, Cx, Cy]. */
-  amountPublicInputs: readonly [bigint, bigint, bigint];
+  /** AmountDisclose publicInputs [claimedAmount, Cx, Cy, nonce] — 4 signals. */
+  amountPublicInputs: readonly [bigint, bigint, bigint, bigint];
   /** ConfidentialTransfer proof (uint256[8]) for the residual spend. */
   transferProof: ProofUint256;
   /** ConfidentialTransfer publicInputs [C_old.x,y, C_tx.x,y, C_new.x,y]. */
   transferPublicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
   /** New blinding for residual commitment (needed for snapshot encryption). */
   newBlinding: bigint;
+  /** Nonce used in the amount-disclose proof. */
+  nonce: bigint;
 }
 import { orchestrateShieldedTransfer, orchestrateShieldedTransferWithPrebuiltProof } from "../orchestration/shielded-transfer";
 import { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "../orchestration/unwrap";
@@ -103,7 +106,7 @@ import { scanIncomingNotes } from "../scan/event-scanner";
 import { getLatestSnapshot } from "../scan/latest-snapshot";
 
 const NATIVE_ABI = [
-  "function wrap(uint256[2] txCommit, uint256[8] amountProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable",
+  "function wrapWithProof(uint256 nonce, uint256[2] commit, uint256[2] pA, uint256[2][2] pB, uint256[2] pC, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable",
   "function shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY) external",
   "function unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
   "function feeBps() view returns (uint16)",
@@ -233,10 +236,14 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
       senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
     });
 
+    const { pA, pB, pC } = splitProof(orch.amountProof);
     const contract = this._rw(signer);
-    const tx = await contract.wrap(
+    const tx = await contract.wrapWithProof(
+      orch.nonce,
       [orch.txCommit[0], orch.txCommit[1]],
-      [...orch.amountProof],
+      pA,
+      pB,
+      pC,
       ethers.hexlify(orch.encryptedSnapshot),
       orch.ephPubkeyX,
       orch.ephPubkeyY,
@@ -293,6 +300,7 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
           proof: params.prebuiltProof.proof,
           txCommit: params.prebuiltProof.txCommit,
           blinding: params.prebuiltProof.blinding,
+          nonce: params.prebuiltProof.nonce,
           publicInputs: params.prebuiltProof.publicInputs,
         })
       : await orchestrateWrap({
@@ -301,12 +309,16 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
           senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
         });
 
-    // ABI-encode the JanusFlow.wrap call as calldata.
-    // Signature: wrap(uint256[2],uint256[8],bytes,uint256,uint256)
+    // ABI-encode the JanusFlow.wrapWithProof call as calldata.
+    // Signature: wrapWithProof(uint256,uint256[2],uint256[2],uint256[2][2],uint256[2],bytes,uint256,uint256)
+    const { pA, pB, pC } = splitProof(orch.amountProof);
     const iface = new ethers.Interface(NATIVE_ABI);
-    const calldata = iface.encodeFunctionData("wrap", [
+    const calldata = iface.encodeFunctionData("wrapWithProof", [
+      orch.nonce,
       [orch.txCommit[0], orch.txCommit[1]],
-      [...orch.amountProof],
+      pA,
+      pB,
+      pC,
       ethers.hexlify(orch.encryptedSnapshot),
       orch.ephPubkeyX,
       orch.ephPubkeyY,
@@ -558,6 +570,7 @@ transaction(calldataHex: String, proxyHex: String) {
           transferProof: params.prebuiltProofs.transferProof,
           transferPublicInputs: params.prebuiltProofs.transferPublicInputs,
           newBlinding: params.prebuiltProofs.newBlinding,
+          nonce: params.prebuiltProofs.nonce,
         })
       : await orchestrateUnwrap({
           claimedAmount: params.claimedAmount,
