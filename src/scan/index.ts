@@ -11,6 +11,7 @@ export {
   scanCadenceSnapshots,
   scanCadenceIncomingNotes,
   getLatestSealedHeight,
+  findFirstSnapshotBlock,
 } from "./cadence-scanner";
 export type {
   CadenceSnapshotEvent,

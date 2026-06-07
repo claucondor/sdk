@@ -26,7 +26,7 @@
  */
 
 import type { DepositRecord } from "../types";
-import { FLOW_CADENCE_ACCESS } from "../network/contracts";
+import { FLOW_CADENCE_ACCESS, PROTOCOL_GENESIS_BLOCK, FIRST_SNAPSHOT_LIVE_BLOCK } from "../network/contracts";
 
 const FLOW_EVENT_RANGE_MAX = 250; // testnet cap per /v1/events request
 // Default lookback when no fromBlock is provided. Flow testnet caps event
@@ -318,4 +318,67 @@ export async function scanCadenceIncomingNotes(
 
   results.sort((a, b) => a.blockHeight - b.blockHeight);
   return results;
+}
+
+/**
+ * Find the per-user scan anchor for a JanusFT address.
+ *
+ * Strategy:
+ *   1. Query the `FirstSnapshot` event for the given address starting from
+ *      FIRST_SNAPSHOT_LIVE_BLOCK (the first block at which JanusFT emitted
+ *      FirstSnapshot events). This window is small and fast on testnet.
+ *   2. If a FirstSnapshot event is found for this address: return its `block`
+ *      field (the Cadence block at which the user first interacted).
+ *   3. If no event found: the user either never interacted OR they interacted
+ *      between PROTOCOL_GENESIS_BLOCK and FIRST_SNAPSHOT_LIVE_BLOCK (before
+ *      the event was live). Fall back to PROTOCOL_GENESIS_BLOCK so the caller
+ *      scans from the contract deploy block forward — guaranteed to capture
+ *      any wrap that happened after deployment.
+ *
+ * @returns `{ block, source }` — block is the Cadence scan start height as bigint;
+ *   source is "event" if a FirstSnapshot event was found, "fallback" otherwise.
+ */
+export async function findFirstSnapshotBlock(
+  userAddress: string,
+  contractAddress: string,
+  contractName: string,
+  opts?: { accessApi?: string }
+): Promise<{ block: bigint; source: "event" | "fallback" }> {
+  const accessApi = opts?.accessApi ?? FLOW_CADENCE_ACCESS;
+  const addrHex = contractAddress.replace(/^0x/, "");
+  const normalizedUser = userAddress.toLowerCase().startsWith("0x")
+    ? userAddress.toLowerCase()
+    : `0x${userAddress.toLowerCase()}`;
+
+  const eventType = `A.${addrHex}.${contractName}.FirstSnapshot`;
+  const latest = await getLatestSealedHeight(accessApi);
+
+  const searchFrom = Number(FIRST_SNAPSHOT_LIVE_BLOCK);
+  if (latest < searchFrom) {
+    // Chain hasn't reached the live block yet (unexpected on testnet) — use genesis fallback
+    return { block: PROTOCOL_GENESIS_BLOCK, source: "fallback" };
+  }
+
+  // fetchEvents paginates internally in 250-block chunks.
+  // The window (FIRST_SNAPSHOT_LIVE_BLOCK → latest) is small on testnet
+  // (e.g. only ~1,500 blocks at time of implementation) so this is very fast.
+  const rows = await fetchEvents(accessApi, eventType, searchFrom, latest);
+
+  for (const row of rows) {
+    for (const ev of row.events ?? []) {
+      try {
+        const payload = JSON.parse(b64DecodeToString(ev.payload)) as JsonCDCValue;
+        const fields = eventFieldsByName(payload);
+        if (!fields["account"] || cdcAddress(fields["account"]) !== normalizedUser) continue;
+        if (!fields["block"]) continue;
+        const blockNum = cdcBigInt(fields["block"]);
+        return { block: blockNum, source: "event" };
+      } catch {
+        /* skip undecodable payloads */
+      }
+    }
+  }
+
+  // No FirstSnapshot event for this address — use protocol genesis as fallback
+  return { block: PROTOCOL_GENESIS_BLOCK, source: "fallback" };
 }

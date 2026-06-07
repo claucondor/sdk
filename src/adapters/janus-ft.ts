@@ -38,7 +38,7 @@ import type { Point } from "../types/commitment";
 import type { ProofUint256 } from "../types/proof";
 import type { CadenceFTTokenEntry } from "../types";
 import { ethers } from "ethers";
-import { FLOW_CADENCE_ACCESS, FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS, UFIX64_SCALE } from "../network/contracts";
+import { FLOW_CADENCE_ACCESS, FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS, UFIX64_SCALE, PROTOCOL_GENESIS_BLOCK } from "../network/contracts";
 
 const FT_MEMO_REGISTRY_ABI = [
   "function getMemoKey(address) view returns (uint256 x, uint256 y, uint256 publishedAt)",
@@ -51,6 +51,7 @@ import { decryptNote } from "../crypto/note-schema";
 import {
   scanCadenceSnapshots,
   scanCadenceIncomingNotes,
+  findFirstSnapshotBlock,
 } from "../scan/cadence-scanner";
 
 // ---------------------------------------------------------------------------
@@ -504,10 +505,20 @@ access(all) fun main(addr: Address): {String: UInt256} {
     }
   }
 
-  async getFirstSnapshotBlock(_addr: string): Promise<bigint> {
-    // Cadence FT doesn't use EVM block numbers — return 0n
-    // Scan will use a fallback window in this case
-    return 0n;
+  /**
+   * Returns the Cadence block height of the user's first JanusFT interaction,
+   * using the on-chain FirstSnapshot event as anchor. Falls back to
+   * PROTOCOL_GENESIS_BLOCK if no FirstSnapshot event is found (user wrapped
+   * before the event was live, i.e. between deploy block and first-live block).
+   */
+  async getFirstSnapshotBlock(addr: string): Promise<bigint> {
+    const { block } = await findFirstSnapshotBlock(
+      addr,
+      this.entry.cadenceAddress,
+      this.entry.contractName,
+      { accessApi: this.accessApiUrl }
+    );
+    return block;
   }
 
   async feeBps(): Promise<number> {
@@ -941,16 +952,29 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
   /**
    * Scan ShieldedTransferWithSnapshot events on JanusFT for incoming notes
    * addressed to `addr`. Uses Flow REST events API.
+   *
+   * When no `fromBlock` is provided, uses the FirstSnapshot anchor for `addr`
+   * (falling back to PROTOCOL_GENESIS_BLOCK if no event is found).
    */
   async scanDeposits(addr: string, fromBlock?: bigint): Promise<DepositRecord[]> {
+    let resolvedFromBlock: number;
+    if (fromBlock !== undefined) {
+      resolvedFromBlock = Number(fromBlock);
+    } else {
+      const { block } = await findFirstSnapshotBlock(
+        addr,
+        this.entry.cadenceAddress,
+        this.entry.contractName,
+        { accessApi: this.accessApiUrl }
+      );
+      resolvedFromBlock = Number(block);
+    }
+
     const records = await scanCadenceIncomingNotes(
       addr,
       this.entry.cadenceAddress,
       this.entry.contractName,
-      {
-        accessApi: this.accessApiUrl,
-        ...(fromBlock !== undefined ? { fromBlock: Number(fromBlock) } : {}),
-      }
+      { accessApi: this.accessApiUrl, fromBlock: resolvedFromBlock }
     );
     return records.map((r) => ({
       ciphertext: r.ciphertext,
@@ -973,18 +997,35 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
 
   /**
    * Reconstruct the latest shielded state from on-chain Cadence events.
-   * Scans WrapWithSnapshot / ShieldedTransferWithSnapshot (sender side) /
-   * UnwrapWithSnapshot, decrypts each blob, picks highest timestampMs.
+   *
+   * Uses FirstSnapshot event lookup to find the exact per-user scan anchor:
+   *   - If a FirstSnapshot event exists: scan from that block forward.
+   *   - Otherwise (user wrapped before event was live): scan from
+   *     PROTOCOL_GENESIS_BLOCK (v0.7 deploy block) forward as fallback.
+   *
+   * This eliminates the DEFAULT_LOOKBACK heuristic and guarantees correct
+   * recovery regardless of when the user first interacted.
    */
   async latestSnapshot(addr: string, myMemoPrivKey: bigint): Promise<SnapshotContent> {
-    const events = await scanCadenceSnapshots(
+    const { block: fromBlock, source } = await findFirstSnapshotBlock(
       addr,
       this.entry.cadenceAddress,
       this.entry.contractName,
       { accessApi: this.accessApiUrl }
     );
+
+    const events = await scanCadenceSnapshots(
+      addr,
+      this.entry.cadenceAddress,
+      this.entry.contractName,
+      { accessApi: this.accessApiUrl, fromBlock: Number(fromBlock) }
+    );
+
     if (events.length === 0) {
-      throw new Error(`JanusFTAdapter.latestSnapshot: no snapshot events found for ${addr}`);
+      throw new Error(
+        `JanusFTAdapter.latestSnapshot: no snapshot events found for ${addr} ` +
+        `(anchor source: ${source}, fromBlock: ${fromBlock})`
+      );
     }
 
     const decoded: SnapshotContent[] = [];
@@ -994,7 +1035,8 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
     }
     if (decoded.length === 0) {
       throw new Error(
-        `JanusFTAdapter.latestSnapshot: ${events.length} snapshot events found for ${addr} but none decrypted with the supplied memoPrivKey`
+        `JanusFTAdapter.latestSnapshot: ${events.length} snapshot events found for ${addr} ` +
+        `but none decrypted with the supplied memoPrivKey (anchor source: ${source}, fromBlock: ${fromBlock})`
       );
     }
     decoded.sort((a, b) => b.timestampMs - a.timestampMs);

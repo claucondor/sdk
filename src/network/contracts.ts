@@ -102,3 +102,20 @@ export const FLOW_EVM_RPC = "https://testnet.evm.nodes.onflow.org";
  * Flow Cadence testnet access node.
  */
 export const FLOW_CADENCE_ACCESS = "https://rest-testnet.onflow.org";
+
+/**
+ * JanusFT v0.7 deploy block on Flow testnet (2026-06-04).
+ * Used as fallback `fromBlock` for accounts that wrapped between the deploy
+ * block and the FirstSnapshot event going live — i.e. accounts that have no
+ * FirstSnapshot event on-chain but whose wrap events DO exist after this block.
+ */
+export const PROTOCOL_GENESIS_BLOCK = 325328960n;
+
+/**
+ * Block at which the FirstSnapshot event was first emitted by JanusFT on testnet.
+ * Accounts that wrapped between PROTOCOL_GENESIS_BLOCK and this block have NO
+ * FirstSnapshot event and must use PROTOCOL_GENESIS_BLOCK as their scan anchor.
+ * Accounts that first interacted at or after this block will have a FirstSnapshot
+ * event and can use it for a precise, per-user scan anchor.
+ */
+export const FIRST_SNAPSHOT_LIVE_BLOCK = 325631233n;
