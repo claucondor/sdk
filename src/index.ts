@@ -110,6 +110,10 @@ export { deriveMemoKeyFromSignature, MEMO_KEY_CONTEXT } from "./crypto/memokey";
 export { deriveBabyJubKeypairFromBytes } from "./crypto/derive-keypair";
 export { encryptSnapshot, decryptSnapshot } from "./crypto/snapshot-schema";
 export { encryptNote, decryptNote } from "./crypto/note-schema";
+export { encryptShieldedNote, decryptShieldedNote } from "./crypto/shielded-note";
+export type { ShieldedNote } from "./crypto/shielded-note";
+export { decryptAnyNote } from "./crypto/decrypt-any-note";
+export type { DecryptedAnyNote } from "./crypto/decrypt-any-note";
 export { generateBlinding } from "./crypto/commitment";
 export { generateBabyJubKeypair, pubkeyFromPrivkey, computeSharedSecret } from "./crypto/babyjub-keypair";
 
@@ -130,7 +134,7 @@ export { createEvmProvider, createEvmWallet, configureFCL, NETWORK_CONFIG } from
 export type { FlowNetwork } from "./network/flow-client";
 
 // Orchestration (for custom adapter authors)
-export { orchestrateWrap } from "./orchestration/wrap";
+export { orchestrateWrap, randomNonce256 } from "./orchestration/wrap";
 export type { WrapOrchestrateInput, WrapOrchestrateResult } from "./orchestration/wrap";
 export { orchestrateShieldedTransfer } from "./orchestration/shielded-transfer";
 export type { ShieldedTransferOrchestrateInput, ShieldedTransferOrchestrateResult } from "./orchestration/shielded-transfer";
@@ -139,7 +143,8 @@ export type { UnwrapOrchestrateInput, UnwrapOrchestrateResult } from "./orchestr
 
 // Scan helpers
 export { scanSnapshots, scanIncomingNotes } from "./scan/event-scanner";
-export { getLatestSnapshot } from "./scan/latest-snapshot";
+export { getLatestSnapshot, getLatestSnapshotWithBlock } from "./scan/latest-snapshot";
+export type { LatestSnapshotResult } from "./scan/latest-snapshot";
 
 // Fee helpers (pure math, no provider)
 export {

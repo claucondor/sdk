@@ -82,3 +82,8 @@ export type { ShieldedNote } from "./shielded-note";
 export { encryptSnapshot, decryptSnapshot } from "./snapshot-schema";
 export { encryptNote, decryptNote } from "./note-schema";
 export type { SnapshotContent, NoteContent } from "../types";
+
+// OF-7: format-agnostic decrypt (tries v3 then shielded; use when token type is unknown).
+// When the token type is known, use adapter.decryptIncomingNote() — no fallback overhead.
+export { decryptAnyNote } from "./decrypt-any-note";
+export type { DecryptedAnyNote } from "./decrypt-any-note";

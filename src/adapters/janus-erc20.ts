@@ -73,6 +73,7 @@ import { decryptSnapshot } from "../crypto/snapshot-schema";
 import { decryptNote } from "../crypto/note-schema";
 import { scanIncomingNotes } from "../scan/event-scanner";
 import { getLatestSnapshot } from "../scan/latest-snapshot";
+import type { DecryptedAnyNote } from "../crypto/decrypt-any-note";
 
 const ERC20_JANUS_ABI = [
   "function wrapWithProof(uint256 amount, uint256 nonce, uint256[2] commit, uint256[2] pA, uint256[2][2] pB, uint256[2] pC, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
@@ -321,7 +322,7 @@ transaction(approveCalldata: String, wrapCalldata: String, underlyingHex: String
       value: EVM.Balance(attoflow: 0)
     )
     assert(approveResult.status == EVM.Status.successful,
-      message: "ERC20.approve reverted — errorCode: ".concat(approveResult.errorCode.toString()).concat(" ").concat(approveResult.errorMessage))
+      message: "ERC20.approve reverted — errorCode: ".concat(approveResult.errorCode.toString()).concat(" ").concat(approveResult.errorMessage).concat(" data: 0x").concat(String.encodeHex(approveResult.data)))
 
     // 2. Call JanusERC20.wrap.
     let wrapResult = coa.call(
@@ -331,7 +332,7 @@ transaction(approveCalldata: String, wrapCalldata: String, underlyingHex: String
       value: EVM.Balance(attoflow: 0)
     )
     assert(wrapResult.status == EVM.Status.successful,
-      message: "JanusERC20.wrap reverted — errorCode: ".concat(wrapResult.errorCode.toString()).concat(" ").concat(wrapResult.errorMessage))
+      message: "JanusERC20.wrap reverted — errorCode: ".concat(wrapResult.errorCode.toString()).concat(" ").concat(wrapResult.errorMessage).concat(" data: 0x").concat(String.encodeHex(wrapResult.data)))
   }
 }
 `;
@@ -373,6 +374,7 @@ transaction(approveCalldata: String, wrapCalldata: String, underlyingHex: String
       senderMemoKeypair: { privkey: 0n, pubkey: senderMemoKey },
       recipientMemoKey,
       memo: params.memo,
+      recipient: params.recipient,
     });
     const contract = this._rw(signer);
     const tx = await contract.shieldedTransfer(
@@ -427,6 +429,7 @@ transaction(approveCalldata: String, wrapCalldata: String, underlyingHex: String
           senderMemoKeypair: { privkey: 0n, pubkey: senderMemoKey },
           recipientMemoKey,
           memo: params.memo,
+          recipient: params.recipient,
           proof: params.prebuiltProof.proof,
           publicInputs: params.prebuiltProof.publicInputs,
           transferBlinding: params.prebuiltProof.transferBlinding,
@@ -439,6 +442,7 @@ transaction(approveCalldata: String, wrapCalldata: String, underlyingHex: String
           senderMemoKeypair: { privkey: 0n, pubkey: senderMemoKey },
           recipientMemoKey,
           memo: params.memo,
+          recipient: params.recipient,
         });
 
     const iface = new ethers.Interface(ERC20_JANUS_ABI);
@@ -568,7 +572,7 @@ transaction(calldataHex: String, proxyHex: String) {
       value: EVM.Balance(attoflow: 0)
     )
     assert(result.status == EVM.Status.successful,
-      message: "JanusERC20.unwrap reverted — errorCode: ".concat(result.errorCode.toString()).concat(" ").concat(result.errorMessage))
+      message: "JanusERC20.unwrap reverted — errorCode: ".concat(result.errorCode.toString()).concat(" ").concat(result.errorMessage).concat(" data: 0x").concat(String.encodeHex(result.data)))
   }
 }
 `;
@@ -623,6 +627,35 @@ transaction(calldataHex: String, proxyHex: String) {
 
   async decryptNoteTo(blob: Uint8Array, ephPub: Point, myMemoPrivKey: bigint): Promise<NoteContent> {
     return decryptNote(blob, ephPub, myMemoPrivKey);
+  }
+
+  /**
+   * Decrypt an incoming note using the v3 wire format (EVM path).
+   * Use this when you know the ciphertext came from a JanusERC20 shielded transfer.
+   * For unknown token types, use the standalone decryptAnyNote() util instead.
+   */
+  async decryptIncomingNote(
+    ciphertext: Uint8Array | number[],
+    ephPubkey: { x: bigint; y: bigint } | [bigint, bigint],
+    memoPrivKey: bigint
+  ): Promise<DecryptedAnyNote | null> {
+    const ct = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext);
+    const pub = Array.isArray(ephPubkey)
+      ? { x: ephPubkey[0], y: ephPubkey[1] }
+      : ephPubkey;
+    try {
+      const v3 = await decryptNote(ct, pub, memoPrivKey);
+      return {
+        amount: v3.amount,
+        blinding: v3.blinding,
+        memo: v3.memo,
+        data: v3.memo,
+        tipId: v3.tipId,
+        wireFormat: "v3" as const,
+      };
+    } catch {
+      return null;
+    }
   }
 
   async decryptSnapshot(blob: Uint8Array, ephPub: Point, myMemoPrivKey: bigint): Promise<SnapshotContent> {

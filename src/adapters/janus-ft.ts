@@ -39,6 +39,7 @@ import type { ProofUint256 } from "../types/proof";
 import type { CadenceFTTokenEntry } from "../types";
 import { ethers } from "ethers";
 import { FLOW_CADENCE_ACCESS, FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS, UFIX64_SCALE, PROTOCOL_GENESIS_BLOCK } from "../network/contracts";
+import { getCoaEvmAddress } from "../network/coa";
 
 const FT_MEMO_REGISTRY_ABI = [
   "function getMemoKey(address) view returns (uint256 x, uint256 y, uint256 publishedAt)",
@@ -48,6 +49,8 @@ import { orchestrateShieldedTransfer, orchestrateShieldedTransferWithPrebuiltPro
 import { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "../orchestration/unwrap";
 import { decryptSnapshot } from "../crypto/snapshot-schema";
 import { decryptNote } from "../crypto/note-schema";
+import { decryptShieldedNote } from "../crypto/shielded-note";
+import type { DecryptedAnyNote } from "../crypto/decrypt-any-note";
 import {
   scanCadenceSnapshots,
   scanCadenceIncomingNotes,
@@ -710,9 +713,12 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
     const fcl = await this._fcl();
     const t = await this._fclTypes();
 
+    // Recipient is a Cadence address (16-hex) per FCL tx contract; the shared
+    // EVM MemoKeyRegistry is keyed by COA EVM hex, so resolve it first.
+    const recipientCoa = await getCoaEvmAddress(params.recipient);
     const [senderMemoKey, recipientMemoKey] = await Promise.all([
       this.getMemoKey(params.coaEvmAddr),
-      this.getMemoKey(params.recipient),
+      this.getMemoKey(recipientCoa),
     ]);
     if (!senderMemoKey) {
       throw new Error(
@@ -721,7 +727,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
     }
     if (!recipientMemoKey) {
       throw new Error(
-        `JanusFTAdapter.shieldedTransferViaCoa: recipient ${params.recipient} has no memoKey.`
+        `JanusFTAdapter.shieldedTransferViaCoa: recipient ${params.recipient} (COA ${recipientCoa}) has no memoKey.`
       );
     }
 
@@ -731,6 +737,8 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       senderMemoKeypair: { privkey: 0n, pubkey: senderMemoKey },
       recipientMemoKey,
       memo: params.memo,
+      // Cadence address is more useful for sender display than COA EVM hex
+      recipient: params.recipient,
       proof: params.prebuiltProof.proof,
       publicInputs: params.prebuiltProof.publicInputs,
       transferBlinding: params.prebuiltProof.transferBlinding,
@@ -989,6 +997,34 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
     return decryptNote(blob, ephPub, myMemoPrivKey);
   }
 
+  /**
+   * Decrypt an incoming note using the shielded wire format (Cadence-FT path).
+   * Use this when you know the ciphertext came from a JanusFT shielded transfer.
+   * For unknown token types, use the standalone decryptAnyNote() util instead.
+   */
+  async decryptIncomingNote(
+    ciphertext: Uint8Array | number[],
+    ephPubkey: { x: bigint; y: bigint } | [bigint, bigint],
+    memoPrivKey: bigint
+  ): Promise<DecryptedAnyNote | null> {
+    const ct = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext);
+    const pub = Array.isArray(ephPubkey)
+      ? { x: ephPubkey[0], y: ephPubkey[1] }
+      : ephPubkey;
+    try {
+      const sh = await decryptShieldedNote(ct, pub, memoPrivKey);
+      return {
+        amount: sh.amount,
+        blinding: sh.blinding,
+        memo: sh.data,
+        data: sh.data,
+        wireFormat: "shielded" as const,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async decryptSnapshot(blob: Uint8Array, ephPub: Point, myMemoPrivKey: bigint): Promise<SnapshotContent> {
     const result = await decryptSnapshot(blob, ephPub, myMemoPrivKey);
     if (result === null) throw new Error("JanusFTAdapter.decryptSnapshot: decryption failed");
@@ -1028,10 +1064,13 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
       );
     }
 
-    const decoded: SnapshotContent[] = [];
+    // Track block height alongside decoded snapshot — sort by blockHeight (chain
+    // order, authoritative), NOT by timestampMs which is Date.now() at encrypt
+    // time and can be wrong if the client clock drifts across devices.
+    const decoded: { snap: SnapshotContent; blockHeight: number }[] = [];
     for (const ev of events) {
       const snap = await decryptSnapshot(ev.ciphertext, ev.ephPubkey, myMemoPrivKey);
-      if (snap !== null) decoded.push(snap);
+      if (snap !== null) decoded.push({ snap, blockHeight: ev.blockHeight });
     }
     if (decoded.length === 0) {
       throw new Error(
@@ -1039,7 +1078,7 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
         `but none decrypted with the supplied memoPrivKey (anchor source: ${source}, fromBlock: ${fromBlock})`
       );
     }
-    decoded.sort((a, b) => b.timestampMs - a.timestampMs);
-    return decoded[0]!;
+    decoded.sort((a, b) => b.blockHeight - a.blockHeight);
+    return decoded[0]!.snap;
   }
 }
