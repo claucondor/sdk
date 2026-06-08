@@ -48,6 +48,11 @@
       "import": "./dist/scan/index.js",
       "require": "./dist/scan/index.cjs",
       "types": "./dist/scan/index.d.ts"
+    },
+    "./cadence-tx": {
+      "import": "./dist/cadence-tx/index.js",
+      "require": "./dist/cadence-tx/index.cjs",
+      "types": "./dist/cadence-tx/index.d.ts"
     }
   },
   "files": [

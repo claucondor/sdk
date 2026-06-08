@@ -85,28 +85,17 @@ export async function scanSnapshots(
 
   for (let start = fromBlock; start <= latestBlock; start += CHUNK) {
     const end = Math.min(start + CHUNK - 1, latestBlock);
-    const [wrapLogs, xfrLogs, unwrapLogs] = await Promise.all([
-      provider.getLogs({
-        address: contractAddr,
-        fromBlock: start,
-        toBlock: end,
-        topics: [iface.getEvent("WrapWithSnapshot")!.topicHash, userTopic],
-      }),
-      provider.getLogs({
-        address: contractAddr,
-        fromBlock: start,
-        toBlock: end,
-        // sender is topics[1] — we want sender's snapshot
-        topics: [iface.getEvent("ShieldedTransferWithSnapshot")!.topicHash, userTopic],
-      }),
-      provider.getLogs({
-        address: contractAddr,
-        fromBlock: start,
-        toBlock: end,
-        topics: [iface.getEvent("UnwrapWithSnapshot")!.topicHash, userTopic],
-      }),
-    ]);
-    for (const log of [...wrapLogs, ...xfrLogs, ...unwrapLogs]) {
+    // Single getLogs call with topics[0]=null, topics[1]=userTopic captures
+    // all three event types (Wrap/ShieldedTransfer/Unwrap) where the user is
+    // actor (sender/wrapper) in a single round-trip. This avoids 3 parallel
+    // getLogs per chunk which would exceed RPC rate limits on large scan ranges.
+    const chunkLogs = await provider.getLogs({
+      address: contractAddr,
+      fromBlock: start,
+      toBlock: end,
+      topics: [null, userTopic],
+    });
+    for (const log of chunkLogs) {
       const key = `${log.blockNumber}-${log.transactionIndex}-${log.index}`;
       if (!seen.has(key)) {
         seen.add(key);
