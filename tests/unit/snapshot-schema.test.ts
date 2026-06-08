@@ -78,3 +78,62 @@ describe("snapshot-schema — roundtrip", () => {
     expect(enc1.ephemeralPubkey.x).not.toBe(enc2.ephemeralPubkey.x);
   });
 });
+
+describe("snapshot-schema v3 — sender metadata roundtrip", () => {
+  it("v3: roundtrip with txAmt, rcp, memo all present", async () => {
+    const keypair = await generateBabyJubKeypair();
+    const snapshot = {
+      balance: 9_000_000_000_000_000_000n,
+      blinding: 99999999999999999999999999999999n,
+      timestampMs: 1_700_000_000_000,
+      txAmt: 1_000_000_000_000_000_000n,
+      rcp: "0xabc123def456aaa",
+      memo: "thanks for the coffee",
+    };
+    const enc = await encryptSnapshot(snapshot, keypair.pubkey);
+    const dec = await decryptSnapshot(enc.ciphertext, enc.ephemeralPubkey, keypair.privkey);
+    expect(dec).not.toBeNull();
+    expect(dec!.balance).toBe(snapshot.balance);
+    expect(dec!.blinding).toBe(snapshot.blinding);
+    expect(dec!.timestampMs).toBe(snapshot.timestampMs);
+    expect(dec!.txAmt).toBe(snapshot.txAmt);
+    expect(dec!.rcp).toBe(snapshot.rcp);
+    expect(dec!.memo).toBe(snapshot.memo);
+  });
+
+  it("v3 backward compat: snapshot WITHOUT txAmt/rcp/memo decrypts with undefined fields", async () => {
+    const keypair = await generateBabyJubKeypair();
+    // No txAmt/rcp/memo — same shape as a wrap/unwrap snapshot
+    const snapshot = {
+      balance: 5_000_000_000_000_000_000n,
+      blinding: 12345678901234567890n,
+      timestampMs: 1_700_000_001_000,
+    };
+    const enc = await encryptSnapshot(snapshot, keypair.pubkey);
+    const dec = await decryptSnapshot(enc.ciphertext, enc.ephemeralPubkey, keypair.privkey);
+    expect(dec).not.toBeNull();
+    expect(dec!.balance).toBe(snapshot.balance);
+    expect(dec!.blinding).toBe(snapshot.blinding);
+    expect(dec!.txAmt).toBeUndefined();
+    expect(dec!.rcp).toBeUndefined();
+    expect(dec!.memo).toBeUndefined();
+  });
+
+  it("v3: empty string memo and rcp round-trip correctly", async () => {
+    const keypair = await generateBabyJubKeypair();
+    const snapshot = {
+      balance: 100n,
+      blinding: 42n,
+      timestampMs: 1000,
+      txAmt: 50n,
+      rcp: "",
+      memo: "",
+    };
+    const enc = await encryptSnapshot(snapshot, keypair.pubkey);
+    const dec = await decryptSnapshot(enc.ciphertext, enc.ephemeralPubkey, keypair.privkey);
+    expect(dec).not.toBeNull();
+    expect(dec!.txAmt).toBe(50n);
+    expect(dec!.rcp).toBe("");
+    expect(dec!.memo).toBe("");
+  });
+});

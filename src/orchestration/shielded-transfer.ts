@@ -34,6 +34,8 @@ export interface ShieldedTransferOrchestrateInput {
   recipientMemoKey: Point;
   memo?: string;
   tipId?: string;
+  /** Recipient hint stored in sender's v3 snapshot (Cadence address or COA EVM hex). */
+  recipient?: string;
 }
 
 export interface ShieldedTransferOrchestrateResult {
@@ -66,6 +68,8 @@ export interface ShieldedTransferOrchestratePrebuiltInput {
   recipientMemoKey: Point;
   memo?: string;
   tipId?: string;
+  /** Recipient hint stored in sender's v3 snapshot (Cadence address or COA EVM hex). */
+  recipient?: string;
   /** Pre-built ConfidentialTransfer proof (uint256[8]). */
   proof: ProofUint256;
   /** Public inputs [C_old.x, C_old.y, C_tx.x, C_tx.y, C_new.x, C_new.y]. */
@@ -92,6 +96,7 @@ export async function orchestrateShieldedTransferWithPrebuiltProof(
     recipientMemoKey,
     memo,
     tipId,
+    recipient,
     proof,
     publicInputs,
     transferBlinding,
@@ -112,9 +117,16 @@ export async function orchestrateShieldedTransferWithPrebuiltProof(
   const newBalance = currentBalance - transferAmount;
   const nowMs = Date.now();
 
-  // Encrypt sender's residual snapshot (ephemeral A)
+  // Encrypt sender's residual snapshot (ephemeral A) — v3 includes transfer metadata
   const snapshotEnc = await encryptSnapshot(
-    { balance: newBalance, blinding: newBlinding, timestampMs: nowMs },
+    {
+      balance: newBalance,
+      blinding: newBlinding,
+      timestampMs: nowMs,
+      txAmt: transferAmount,
+      rcp: recipient ?? "",
+      memo: memo ?? "",
+    },
     senderMemoKeypair.pubkey
   );
 
@@ -154,6 +166,7 @@ export async function orchestrateShieldedTransfer(
     recipientMemoKey,
     memo,
     tipId,
+    recipient,
   } = input;
 
   if (transferAmount <= 0n) {
@@ -183,9 +196,16 @@ export async function orchestrateShieldedTransfer(
   const newBalance = currentBalance - transferAmount;
   const nowMs = Date.now();
 
-  // 3. Encrypt sender's residual snapshot to their own memokey (ephemeral A)
+  // 3. Encrypt sender's residual snapshot to their own memokey (ephemeral A) — v3 includes transfer metadata
   const snapshotEnc = await encryptSnapshot(
-    { balance: newBalance, blinding: newBlinding, timestampMs: nowMs },
+    {
+      balance: newBalance,
+      blinding: newBlinding,
+      timestampMs: nowMs,
+      txAmt: transferAmount,
+      rcp: recipient ?? "",
+      memo: memo ?? "",
+    },
     senderMemoKeypair.pubkey
   );
 

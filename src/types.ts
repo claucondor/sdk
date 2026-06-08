@@ -66,6 +66,13 @@ export interface SnapshotContent {
   blinding: bigint;
   /** Unix timestamp in MILLISECONDS when this snapshot was encrypted */
   timestampMs: number;
+  // v3 additions — present only on shielded-transfer sender snapshots
+  /** Transfer amount sent (undefined on wrap/unwrap snapshots) */
+  txAmt?: bigint;
+  /** Recipient hint: Cadence address or COA EVM hex (undefined on wrap/unwrap snapshots) */
+  rcp?: string;
+  /** Plaintext memo attached to the transfer (undefined on wrap/unwrap snapshots) */
+  memo?: string;
 }
 
 // ---------------------------------------------------------------------------

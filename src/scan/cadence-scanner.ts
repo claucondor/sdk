@@ -359,22 +359,26 @@ export async function findFirstSnapshotBlock(
     return { block: PROTOCOL_GENESIS_BLOCK, source: "fallback" };
   }
 
-  // fetchEvents paginates internally in 250-block chunks.
-  // The window (FIRST_SNAPSHOT_LIVE_BLOCK → latest) is small on testnet
-  // (e.g. only ~1,500 blocks at time of implementation) so this is very fast.
-  const rows = await fetchEvents(accessApi, eventType, searchFrom, latest);
-
-  for (const row of rows) {
-    for (const ev of row.events ?? []) {
-      try {
-        const payload = JSON.parse(b64DecodeToString(ev.payload)) as JsonCDCValue;
-        const fields = eventFieldsByName(payload);
-        if (!fields["account"] || cdcAddress(fields["account"]) !== normalizedUser) continue;
-        if (!fields["block"]) continue;
-        const blockNum = cdcBigInt(fields["block"]);
-        return { block: blockNum, source: "event" };
-      } catch {
-        /* skip undecodable payloads */
+  // Search BACKWARDS from latest in 250-block windows. Most recently-active
+  // users have FirstSnapshot events near the chain tip; reverse search finds
+  // them in O(1) requests instead of O(N) for forward search through the full
+  // FIRST_SNAPSHOT_LIVE_BLOCK → latest window (which hits Flow Access API rate
+  // limits after ~500 sequential calls).
+  for (let end = latest; end >= searchFrom; end -= FLOW_EVENT_RANGE_MAX) {
+    const start = Math.max(searchFrom, end - FLOW_EVENT_RANGE_MAX + 1);
+    const rows = await fetchEvents(accessApi, eventType, start, end);
+    for (const row of rows) {
+      for (const ev of row.events ?? []) {
+        try {
+          const payload = JSON.parse(b64DecodeToString(ev.payload)) as JsonCDCValue;
+          const fields = eventFieldsByName(payload);
+          if (!fields["account"] || cdcAddress(fields["account"]) !== normalizedUser) continue;
+          if (!fields["block"]) continue;
+          const blockNum = cdcBigInt(fields["block"]);
+          return { block: blockNum, source: "event" };
+        } catch {
+          /* skip undecodable payloads */
+        }
       }
     }
   }

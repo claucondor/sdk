@@ -34,15 +34,25 @@ import type { ProofUint256 } from "../types/proof";
 // ---------------------------------------------------------------------------
 
 /**
- * Generate a cryptographically random 256-bit nonce as a bigint.
- * Uses @noble/hashes randomBytes (works in Node.js and browsers).
- * Collision probability: 1/2^256.
+ * BN254 scalar field modulus. The amount-disclose circuit treats nonce as a
+ * field element; nonce > r gets reduced by snarkjs at proof time, which would
+ * desync from the unreduced uint256 the contract passes to verifyProof
+ * (→ verifier returns false → "JanusFlow: invalid amount_disclose proof").
+ */
+const BN254_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+
+/**
+ * Generate a cryptographically random nonce in [0, BN254_R) as a bigint.
+ * Rejection sampling keeps the value in the circuit field; bias is negligible
+ * (rejection rate < 12%), and collision probability is ≈ 1/2^253.
  */
 export function randomNonce256(): bigint {
-  const bytes = randomBytes(32);
-  let n = 0n;
-  for (const b of bytes) n = (n << 8n) | BigInt(b);
-  return n;
+  while (true) {
+    const bytes = randomBytes(32);
+    let n = 0n;
+    for (const b of bytes) n = (n << 8n) | BigInt(b);
+    if (n < BN254_R) return n;
+  }
 }
 
 // ---------------------------------------------------------------------------
