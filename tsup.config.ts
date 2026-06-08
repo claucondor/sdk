@@ -11,8 +11,6 @@ export default defineConfig({
     "adapters/index": "src/adapters/index.ts",
     "orchestration/index": "src/orchestration/index.ts",
     "scan/index": "src/scan/index.ts",
-    // v0.7.5 cadence-tx builders (PrivateTip EVM-recipient helpers)
-    "cadence-tx/index": "src/cadence-tx/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,

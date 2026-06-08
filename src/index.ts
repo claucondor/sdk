@@ -167,19 +167,3 @@ export {
   getCoaBalanceWei,
   getFlowVaultBalanceWei,
 } from "./network";
-
-// Cadence tx/script builders (PrivateTip v0.8 EVM-recipient path)
-export {
-  buildRecordTipWithSnapshotEvmTx,
-  buildShieldedTransferPlusRecordTipEvmTx,
-  buildShieldedTransferFTPlusRecordTipEvmTx,
-  buildGetShieldedTipsBySenderWithSnapshotEvmScript,
-} from "./cadence-tx/private-tip-evm";
-export type {
-  FclArg,
-  BuildRecordTipEvmTxArgs,
-  RecordTipEvmTxResult,
-  BuildShieldedTransferPlusRecordTipEvmTxArgs,
-  ShieldedTransferPlusRecordTipEvmTxResult,
-  BuildShieldedTransferFTPlusRecordTipEvmTxArgs,
-} from "./cadence-tx/private-tip-evm";

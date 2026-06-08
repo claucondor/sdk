@@ -6,8 +6,7 @@
  */
 export { scanSnapshots, scanIncomingNotes } from "./event-scanner";
 export type { RawSnapshotEvent, RawNoteEvent } from "./event-scanner";
-export { getLatestSnapshot, getLatestSnapshotWithBlock } from "./latest-snapshot";
-export type { LatestSnapshotResult } from "./latest-snapshot";
+export { getLatestSnapshot } from "./latest-snapshot";
 export {
   scanCadenceSnapshots,
   scanCadenceIncomingNotes,
