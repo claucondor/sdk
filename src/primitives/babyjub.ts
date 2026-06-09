@@ -46,8 +46,8 @@ export const BASE8: Point = {
 // Deployed contract addresses
 // ---------------------------------------------------------------------------
 
-/** BabyJub.sol on Flow EVM testnet — canonical openjanus deployment */
-export const BABYJUB_CONTRACT_ADDRESS = "0x2c40513b343B70f2A0B7e6Ad6F997DDa819D6f07";
+/** BabyJub.sol on Flow EVM testnet — v0.8 canonical openjanus deployment */
+export const BABYJUB_CONTRACT_ADDRESS = "0xD79C90b797949F0956d977989aEf82A81c860e0C";
 
 /** Flow EVM testnet RPC */
 export const FLOW_EVM_TESTNET_RPC = "https://testnet.evm.nodes.onflow.org";

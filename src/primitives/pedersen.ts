@@ -37,8 +37,8 @@ export { CURVE_P } from "../types/commitment";
 // Deployed contract addresses (retained for backward-compat consumers)
 // ---------------------------------------------------------------------------
 
-/** BabyJub.sol on Flow EVM testnet — canonical openjanus deployment */
-export const BABYJUB_EVM_ADDRESS = "0x27139AFda7425f51F68D32e0A38b7D43BcB0f870";
+/** BabyJub.sol on Flow EVM testnet — v0.8 canonical openjanus deployment */
+export const BABYJUB_EVM_ADDRESS = "0xD79C90b797949F0956d977989aEf82A81c860e0C";
 
 /** Flow testnet access node */
 export const FLOW_TESTNET_ACCESS_NODE = "https://rest-testnet.onflow.org";

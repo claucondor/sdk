@@ -1,15 +1,22 @@
 /**
- * network/contracts.ts — TOKEN_REGISTRY and VERIFIERS
+ * network/contracts.ts — TOKEN_REGISTRY and contract addresses for v0.8
  *
- * Single source of truth for all v0.7 testnet addresses.
+ * Single source of truth for all v0.8 testnet addresses.
  * The SDK never hard-codes addresses anywhere else — import from here.
  *
  * TOKEN_REGISTRY keys are the stable token IDs used by sdk.token(id).
- * VERIFIERS holds the shared Groth16 verifier addresses (same across all tokens).
  *
- * All addresses from v0.7 clean deploy (2026-06-04).
+ * All addresses from v0.8 clean deploy (2026-06-09).
  * Chain ID: 545 (Flow EVM testnet).
- * Admin: Cadence 0xc4e8f99915893a2f, COA 0x000000000000000000000002656f9205e386ed78
+ * Admin: Cadence 0x4b6bc58bc8bf5dcc, COA 0x0000000000000000000000020885d7ad3582356a
+ *
+ * v0.8 changes from v0.7:
+ *   - New ShieldedInbox + ShieldedCheckpoint contracts (immutable)
+ *   - New JanusFlow + JanusERC20 proxies (6-arg shieldedTransfer)
+ *   - New ConfidentialTransfer + AmountDisclose aggregate verifiers
+ *   - New MemoKeyRegistry address
+ *   - All Cadence contracts at 0x4b6bc58bc8bf5dcc
+ *   - LEGACY_V071_JANUSFLOW_PROXY constant preserved for PrivateTip demo
  */
 
 import type {
@@ -21,29 +28,22 @@ import type {
 export const TOKEN_REGISTRY = {
   flow: {
     variant: "native",
-    proxy: "0x9A83732417947Ef9b7AEa64bF807a345267c2FdA",
+    proxy: "0xA64340C1d356835A2450306Ffd290Ed52c001Ad3",
     decimals: 18,
   } satisfies NativeTokenEntry,
 
   mockusdc: {
     variant: "erc20",
-    proxy: "0xD5E6a52635599E6B2296B5BfEeC617E333561ea0",
-    // JanusERC20_impl: 0xBbF98D59825730F421DA406c6DDbeBe16860fe27 (post-fix deploy 2026-06-04)
-    // Original impl had underlying=address(0); fixed by deploying new impl with
-    // reinitializeUnderlying(address) and upgrading via admin COA.
-    underlying: "0x686E8d90A7B608540cAF46E527fD8a5631A1b658", // MockUSDC
+    proxy: "0xFD8F82bE1782AF1F85f4673065e94fb3F8D5387d",
+    underlying: "0xd49Ff950279841aaEcf642E85C3a0bBc1FB4B524", // MockUSDC (mUSDC)
     decimals: 6,
   } satisfies ERC20TokenEntry,
 
   mockft: {
     variant: "cadence-ft",
-    // cadenceAddress: JanusFT wrapper contract (aggregate v0.7, migrated 2026-06-05).
-    // Deployed under v066-admin account — holds CommitmentRegistry + aggregate verifier calls.
-    cadenceAddress: "0xc4e8f99915893a2f",
+    cadenceAddress: "0x4b6bc58bc8bf5dcc",
     contractName: "JanusFT",
-    // ftAddress: underlying MockFT FT contract (unchanged — was NOT redeployed).
-    // The old address (0x7599043aea001283) was the v0.6 JanusFT wrapper; MockFT still lives there.
-    ftAddress: "0x7599043aea001283",
+    ftAddress: "0x4b6bc58bc8bf5dcc",
     ftContractName: "MockFT",
     decimals: 8, // UFix64 internal: 1.0 = 100_000_000
   } satisfies CadenceFTTokenEntry,
@@ -52,39 +52,50 @@ export const TOKEN_REGISTRY = {
 export type TokenId = keyof typeof TOKEN_REGISTRY;
 
 export const VERIFIERS = {
-  babyJub: "0x27139AFda7425f51F68D32e0A38b7D43BcB0f870",
-  /** ConfidentialTransferAggregateVerifier — aggregate 2-gen Pedersen transfer circuit */
-  transferVerifier: "0x5702A545d2853b03B808aEA331f892c121b67243",
-  /** AmountDiscloseAggregateVerifier — aggregate 2-gen Pedersen amount-disclose circuit */
-  amountDiscloseVerifier: "0xa80283baB7fcEFC2c75De43DB5a1cBF00E96B984",
+  babyJub: "0xD79C90b797949F0956d977989aEf82A81c860e0C",
+  pedersen2Gen: "0x5EdF7473b1007b4855127bC40fcc89eCDD7fB561",
+  /** ConfidentialTransferAggregateVerifier — v0.8 re-deployed */
+  transferVerifier: "0x38e69fE7Ba7c2C586d64DFFc14742641A675666c",
+  /** AmountDiscloseAggregateVerifier — v0.8 re-deployed */
+  amountDiscloseVerifier: "0xf7B634D41259D0613345633eE1CD193A030A6329",
+  /** ConfidentialClaimBatchVerifier — deployed but @experimental (circuit lacks note commitment tracker) */
+  claimBatchVerifier: "0x2FBf6baef1D70f5A9aFF2602c934Bd62dcf6Df80",
 } as const;
 
 /**
- * AmountDiscloseAggregateVerifier — convenience alias for the aggregate verifier.
- * Same value as VERIFIERS.amountDiscloseVerifier; exported separately for
- * callers that only need the amount-disclose verifier address.
+ * ShieldedInbox — per-user on-chain mailbox shared across all JanusFlow/ERC20/FT tokens.
+ * Immutable contract (no proxy). Recipients drain their inbox instead of scanning events.
  */
-export const AGGREGATE_AMOUNT_DISCLOSE_VERIFIER =
-  "0xa80283baB7fcEFC2c75De43DB5a1cBF00E96B984";
+export const SHIELDED_INBOX_ADDRESS = "0x0C787AAcbA9a116EdA4ec05Be41D8474D470bfC6";
 
 /**
- * Shared MemoKeyRegistry — deployed once, read by all Janus EVM token proxies.
- * EVM-only users call publishMemoKey() directly on this contract (one tx covers
- * all tokens). Cadence users call the cross-VM transaction publish_memokey_xvm.cdc
- * which calls this registry from their COA in the same tx that writes to Cadence
- * storage. Introduced in v0.6.3 (Track B++).
+ * ShieldedCheckpoint — per-user encrypted state store for sender balance recovery.
+ * Immutable contract (no proxy). Senders update their checkpoint after each transfer.
  */
-export const MEMO_REGISTRY_ADDRESS = "0x05D104962ff087441f26BA11A1E1C3b9E091D663";
+export const SHIELDED_CHECKPOINT_ADDRESS = "0xbF8dbE133FC1319570dBe43E32BFD9a6D64E1E76";
 
 /**
- * Pedersen2Gen library address (on-chain 2-gen Pedersen math, used by v0.7 contracts).
+ * Shared MemoKeyRegistry — v0.8 deployment.
+ * All EVM Janus tokens share this registry. One publishMemoKey() call covers all.
  */
-export const PEDERSEN_2GEN_LIBRARY = "0xb8Af0091A010E082b05d0c55E1019c3833E15760";
+export const MEMO_REGISTRY_ADDRESS = "0x361bD4d037838A3a9c5408AE465d36077800ee6c";
 
 /**
- * Fee rate used by all v0.7 deployed contracts.
- * 10 bps = 0.1%. The SDK reads this from chain for each operation
- * but this constant is used in tests and fee previews.
+ * Pedersen2Gen library address on-chain.
+ */
+export const PEDERSEN_2GEN_LIBRARY = "0x5EdF7473b1007b4855127bC40fcc89eCDD7fB561";
+
+/**
+ * v0.7.1 JanusFlow proxy — still live, serves the PrivateTip demo at
+ * 0x9A83732417947Ef9b7AEa64bF807a345267c2FdA. Do NOT recycle or remove.
+ * Exported so any code that previously imported TOKEN_REGISTRY.flow.proxy
+ * and needs to reference the old demo contract can find this constant.
+ */
+export const LEGACY_V071_JANUSFLOW_PROXY = "0x9A83732417947Ef9b7AEa64bF807a345267c2FdA";
+
+/**
+ * Fee rate used by all v0.8 deployed contracts.
+ * 10 bps = 0.1%.
  */
 export const DEFAULT_FEE_BPS = 10;
 
@@ -104,18 +115,12 @@ export const FLOW_EVM_RPC = "https://testnet.evm.nodes.onflow.org";
 export const FLOW_CADENCE_ACCESS = "https://rest-testnet.onflow.org";
 
 /**
- * JanusFT v0.7 deploy block on Flow testnet (2026-06-04).
- * Used as fallback `fromBlock` for accounts that wrapped between the deploy
- * block and the FirstSnapshot event going live — i.e. accounts that have no
- * FirstSnapshot event on-chain but whose wrap events DO exist after this block.
+ * Cadence deployer address for all v0.8 contracts.
  */
-export const PROTOCOL_GENESIS_BLOCK = 325328960n;
+export const CADENCE_DEPLOYER_ADDRESS = "0x4b6bc58bc8bf5dcc";
 
 /**
- * Block at which the FirstSnapshot event was first emitted by JanusFT on testnet.
- * Accounts that wrapped between PROTOCOL_GENESIS_BLOCK and this block have NO
- * FirstSnapshot event and must use PROTOCOL_GENESIS_BLOCK as their scan anchor.
- * Accounts that first interacted at or after this block will have a FirstSnapshot
- * event and can use it for a precise, per-user scan anchor.
+ * COA EVM address of the Cadence deployer (owner of all EVM proxies).
+ * Admin calls to JanusFlow/JanusERC20 must go through this COA via Cadence.
  */
-export const FIRST_SNAPSHOT_LIVE_BLOCK = 325631233n;
+export const COA_DEPLOYER_EVM_ADDRESS = "0x0000000000000000000000020885d7ad3582356a";
