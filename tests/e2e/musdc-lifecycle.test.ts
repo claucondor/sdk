@@ -70,8 +70,8 @@ describe("E2E: mUSDC full lifecycle via SDK public API", () => {
     skipIfNotE2E();
 
     const alice = makeAlice(); // deployer — minting only
-    sender = await createFundedAccount("0.02");
-    bob    = await createFundedAccount("0.01");
+    sender = await createFundedAccount("0.05"); // gas for ERC20 txs (~0.04 FLOW)
+    bob    = await createFundedAccount("0.005");
 
     senderJub = await deriveMemoJub(sender.address, "e2e-musdc:sender:v1");
     bobJub    = await deriveMemoJub(bob.address,    "e2e-musdc:bob:v1");

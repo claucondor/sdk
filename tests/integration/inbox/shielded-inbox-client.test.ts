@@ -3,15 +3,20 @@
  *
  * Integration tests for ShieldedInboxClient against deployed v0.8 testnet.
  *
+ * Uses FRESH sender + Bob accounts to avoid C_old mismatch from prior test runs
+ * that may have left stale commitment state on the deployer address.
+ * The deployer (Alice) only funds fresh accounts.
+ *
  * Tests (in order):
- *   1. count: Bob starts with 0 pending notes
- *   2. peek: no notes to peek at
- *   3. Alice wraps FLOW + shieldedTransfers to Bob (seeds Bob's inbox)
- *   4. count: Bob has 1 note
- *   5. peek: non-consuming read works
- *   6. drainBatch: drains 1 note, returns Note struct
- *   7. count: Bob has 0 notes after drain
- *   8. drainAndDecrypt: wrap + transfer again, then drain + decrypt in one call
+ *   1. Drain Bob's inbox to start clean
+ *   2. count: Bob starts with 0 pending notes
+ *   3. peek: no notes to peek at
+ *   4. Sender wraps FLOW + shieldedTransfers to Bob (seeds Bob's inbox)
+ *   5. count: Bob has 1 note
+ *   6. peek: non-consuming read works
+ *   7. drainBatch: drains 1 note, returns Note struct
+ *   8. count: Bob has 0 notes after drain
+ *   9. drainAndDecrypt: transfer again, then drain + decrypt in one call
  *
  * Gated by RUN_INTEGRATION=1.
  */
@@ -26,6 +31,7 @@ import {
   ADDRESSES,
   JANUS_FLOW_ABI,
   TINY_FLOW,
+  MICRO_FLOW,
   splitProofForEvm,
 } from "../helpers/testnet";
 import {
@@ -42,34 +48,34 @@ describe("ShieldedInboxClient — integration", () => {
   const inboxClient = new ShieldedInboxClient();
   const adapter     = new JanusFlowAdapter("flow", TOKEN_REGISTRY.flow);
 
-  let alice: ReturnType<typeof makeDeployerWallet>;
-  let bob:   Awaited<ReturnType<typeof createFreshBob>>;
+  // Use fresh sender (not deployer) to avoid C_old mismatch with prior runs
+  let sender: Awaited<ReturnType<typeof createFreshBob>>;
+  let bob:    Awaited<ReturnType<typeof createFreshBob>>;
 
-  let aliceJub: Awaited<ReturnType<typeof deriveMemoKeypair>>;
-  let bobJub:   Awaited<ReturnType<typeof deriveMemoKeypair>>;
+  let senderJub: Awaited<ReturnType<typeof deriveMemoKeypair>>;
+  let bobJub:    Awaited<ReturnType<typeof deriveMemoKeypair>>;
 
-  // Shared state: Alice's balance after each wrap
-  let aliceBalance: bigint;
-  let aliceBlinding: bigint;
+  // Shared state: sender's balance after each wrap
+  let senderBalance:  bigint;
+  let senderBlinding: bigint;
 
   beforeAll(async () => {
     if (SKIP) return;
     skipIfNotIntegration();
 
-    alice = makeDeployerWallet();
-    bob   = await createFreshBob("0.01");
+    // Fresh accounts — deployer funds them
+    sender = await createFreshBob("0.07"); // enough for gas (0.04) + wrap (0.02)
+    bob    = await createFreshBob("0.005");
 
-    aliceJub = await deriveMemoKeypair(alice.address, "inbox-test:alice");
-    bobJub   = await deriveMemoKeypair(bob.address,   "inbox-test:bob");
+    senderJub = await deriveMemoKeypair(sender.address, "inbox-test:sender");
+    bobJub    = await deriveMemoKeypair(bob.address,    "inbox-test:bob");
 
     // Ensure both memokeys are registered
-    const aliceKey = await adapter.getMemoKey(alice.address);
-    if (!aliceKey || aliceKey.x !== aliceJub.pubkey.x) {
-      if (!aliceKey) {
-        await adapter.publishMemoKey(aliceJub, alice);
-      } else {
-        await adapter.rotateMemoKey(aliceJub, alice);
-      }
+    const senderKey = await adapter.getMemoKey(sender.address);
+    if (!senderKey) {
+      await adapter.publishMemoKey(senderJub, sender.wallet);
+    } else if (senderKey.x !== senderJub.pubkey.x || senderKey.y !== senderJub.pubkey.y) {
+      await adapter.rotateMemoKey(senderJub, sender.wallet);
     }
 
     const bobKey = await adapter.getMemoKey(bob.address);
@@ -77,8 +83,8 @@ describe("ShieldedInboxClient — integration", () => {
       await adapter.publishMemoKey(bobJub, bob.wallet);
     }
 
-    console.log(`[Inbox] Alice: ${alice.address}`);
-    console.log(`[Inbox] Bob:   ${bob.address}`);
+    console.log(`[Inbox] Sender: ${sender.address} (funded: ${sender.fundTxHash})`);
+    console.log(`[Inbox] Bob:    ${bob.address}`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
@@ -118,26 +124,21 @@ describe("ShieldedInboxClient — integration", () => {
   }, 30_000);
 
   // ---------------------------------------------------------------------------
-  // Step 3 — Alice wraps + sends to Bob
+  // Step 3 — Sender wraps + sends to Bob (fresh sender, clean slot)
   // ---------------------------------------------------------------------------
 
-  it("should seed Bob's inbox via Alice wrap + shieldedTransfer", async () => {
+  it("should seed Bob's inbox via sender wrap + shieldedTransfer", async () => {
     if (SKIP) return;
 
     // Use orchestrateWrap to capture blinding (needed for subsequent transfer)
-    const feeBps = await adapter.feeBps();
+    const feeBps   = await adapter.feeBps();
     const orchWrap = await orchestrateWrap({
-      grossAmount:      TINY_FLOW,
+      grossAmount:       TINY_FLOW,
       feeBps,
-      senderMemoKeypair: { privkey: 0n, pubkey: aliceJub.pubkey },
+      senderMemoKeypair: { privkey: 0n, pubkey: senderJub.pubkey },
     });
 
-    // Submit wrap via direct ethers (integration tests may use ethers.Contract)
-    const janusFlow = new ethers.Contract(
-      ADDRESSES.janusFlow,
-      JANUS_FLOW_ABI,
-      alice
-    );
+    const janusFlow = new ethers.Contract(ADDRESSES.janusFlow, JANUS_FLOW_ABI, sender.wallet);
     const { pA, pB, pC } = splitProofForEvm(orchWrap.amountProof);
     const wrapTx = await janusFlow.wrapWithProof(
       orchWrap.nonce,
@@ -149,20 +150,20 @@ describe("ShieldedInboxClient — integration", () => {
       { value: TINY_FLOW }
     );
     await wrapTx.wait(1);
-    console.log(`[Inbox] Alice wrap tx: ${wrapTx.hash}`);
+    console.log(`[Inbox] Sender wrap tx: ${wrapTx.hash}`);
 
-    aliceBalance  = orchWrap.netAmount;
-    aliceBlinding = orchWrap.blinding;
+    senderBalance  = orchWrap.netAmount;
+    senderBlinding = orchWrap.blinding;
 
-    // Transfer to Bob
-    const transferAmount = aliceBalance / 2n; // 50% of wrapped amount
-    const bobCountBefore = await inboxClient.count(bob.address);
+    // Transfer half to Bob
+    const transferAmount  = senderBalance / 2n;
+    const bobCountBefore  = await inboxClient.count(bob.address);
 
     const orchXfer = await orchestrateShieldedTransfer({
-      currentBalance:    aliceBalance,
-      currentBlinding:   aliceBlinding,
+      currentBalance:    senderBalance,
+      currentBlinding:   senderBlinding,
       transferAmount,
-      senderMemoKeypair: { privkey: 0n, pubkey: aliceJub.pubkey },
+      senderMemoKeypair: { privkey: 0n, pubkey: senderJub.pubkey },
       recipientMemoKey:  bobJub.pubkey,
       memo:              "inbox integration test",
     });
@@ -176,11 +177,11 @@ describe("ShieldedInboxClient — integration", () => {
       orchXfer.txParams.ephPubkeyToY
     );
     await xferTx.wait(1);
-    console.log(`[Inbox] Alice shieldedTransfer tx: ${xferTx.hash}`);
+    console.log(`[Inbox] Sender shieldedTransfer tx: ${xferTx.hash}`);
 
-    // Update Alice's state
-    aliceBalance  = orchXfer.newBalance;
-    aliceBlinding = orchXfer.newBlinding;
+    // Update sender state
+    senderBalance  = orchXfer.newBalance;
+    senderBlinding = orchXfer.newBlinding;
 
     // Verify Bob's inbox count increased
     const bobCountAfter = await inboxClient.count(bob.address);
@@ -207,7 +208,7 @@ describe("ShieldedInboxClient — integration", () => {
     if (SKIP) return;
 
     const countBefore = await inboxClient.count(bob.address);
-    const notes = await inboxClient.peek(bob.address, 0n, 1n);
+    const notes       = await inboxClient.peek(bob.address, 0n, 1n);
 
     expect(notes.length).toBeGreaterThanOrEqual(1);
     const note = notes[0];
@@ -265,45 +266,20 @@ describe("ShieldedInboxClient — integration", () => {
   it("drainAndDecrypt should drain and ECIES-decode notes", async () => {
     if (SKIP) return;
 
-    // Send another note from Alice
-    const janusFlow = new ethers.Contract(
-      ADDRESSES.janusFlow,
-      JANUS_FLOW_ABI,
-      alice
-    );
+    // Send another note from sender (has remaining balance from step 3)
+    const janusFlow = new ethers.Contract(ADDRESSES.janusFlow, JANUS_FLOW_ABI, sender.wallet);
 
-    // Alice has remaining balance from previous transfer
-    if (aliceBalance === 0n) {
-      console.log("[Inbox] Alice balance is 0, wrapping fresh 0.02 FLOW");
-      const feeBps = await adapter.feeBps();
-      const orchWrap = await orchestrateWrap({
-        grossAmount:      TINY_FLOW,
-        feeBps,
-        senderMemoKeypair: { privkey: 0n, pubkey: aliceJub.pubkey },
-      });
-      const { pA, pB, pC } = splitProofForEvm(orchWrap.amountProof);
-      const wrapTx = await janusFlow.wrapWithProof(
-        orchWrap.nonce,
-        [orchWrap.txCommit[0], orchWrap.txCommit[1]],
-        pA, pB, pC,
-        ethers.hexlify(orchWrap.encryptedSnapshot),
-        orchWrap.ephPubkeyX,
-        orchWrap.ephPubkeyY,
-        { value: TINY_FLOW }
-      );
-      await wrapTx.wait(1);
-      aliceBalance  = orchWrap.netAmount;
-      aliceBlinding = orchWrap.blinding;
-    }
+    // Sender still has remaining balance from the first wrap
+    expect(senderBalance).toBeGreaterThan(0n);
 
-    const transferAmount = aliceBalance > 10n ? aliceBalance / 5n : aliceBalance;
-    const memo = "drain-and-decrypt test";
+    const transferAmount = senderBalance > 10n ? senderBalance / 5n : senderBalance;
+    const memo           = "drain-and-decrypt test";
 
     const orchXfer = await orchestrateShieldedTransfer({
-      currentBalance:    aliceBalance,
-      currentBlinding:   aliceBlinding,
+      currentBalance:    senderBalance,
+      currentBlinding:   senderBlinding,
       transferAmount,
-      senderMemoKeypair: { privkey: 0n, pubkey: aliceJub.pubkey },
+      senderMemoKeypair: { privkey: 0n, pubkey: senderJub.pubkey },
       recipientMemoKey:  bobJub.pubkey,
       memo,
     });
@@ -318,8 +294,8 @@ describe("ShieldedInboxClient — integration", () => {
     await xferTx.wait(1);
     console.log(`[Inbox] Second transfer tx: ${xferTx.hash}`);
 
-    aliceBalance  = orchXfer.newBalance;
-    aliceBlinding = orchXfer.newBlinding;
+    senderBalance  = orchXfer.newBalance;
+    senderBlinding = orchXfer.newBlinding;
 
     // Drain and decrypt using Bob's BabyJub private key
     const { notes, decrypted, failed, txHash } =

@@ -69,8 +69,8 @@ describe("JanusERC20Adapter — integration (mUSDC)", () => {
     skipIfNotIntegration();
 
     alice  = makeDeployerWallet();
-    sender = await createFreshBob("0.02"); // fresh account with gas for ERC20 txs
-    bob    = await createFreshBob("0.01");
+    sender = await createFreshBob("0.05"); // gas for 6 ERC20 txs (~0.04 FLOW)
+    bob    = await createFreshBob("0.005");
 
     senderJub = await deriveMemoKeypair(sender.address, "janus-erc20-adapter-test:sender");
     bobJub    = await deriveMemoKeypair(bob.address,    "janus-erc20-adapter-test:bob");

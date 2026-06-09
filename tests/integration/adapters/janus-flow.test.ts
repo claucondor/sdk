@@ -66,9 +66,9 @@ describe("JanusFlowAdapter — integration", () => {
     if (SKIP) return;
     skipIfNotIntegration();
 
-    // Fund sender and bob from deployer wallet (small amounts to save budget)
-    sender = await createFreshBob("0.02");
-    bob    = await createFreshBob("0.01");
+    // Fund sender and bob from deployer wallet
+    sender = await createFreshBob("0.06"); // gas (0.04) + wrap amount (0.02) recovered via unwrap
+    bob    = await createFreshBob("0.005");
 
     senderJub = await deriveMemoKeypair(sender.address, "janus-flow-adapter-test:sender");
     bobJub    = await deriveMemoKeypair(bob.address,    "janus-flow-adapter-test:bob");

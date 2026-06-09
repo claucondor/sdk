@@ -92,8 +92,8 @@ describe("E2E: multi-token — FLOW to Bob, mUSDC to Carol", () => {
   let senderMusdcBlinding: bigint;
 
   // Small amounts to stay within testnet budget
-  const FLOW_WRAP_AMOUNT = AMOUNTS.POINT1_FLOW;  // 0.1 FLOW (recovered via unwrap)
-  const FLOW_TRANSFER    = 5n * 10n ** 15n;       // 0.005 FLOW to Bob
+  const FLOW_WRAP_AMOUNT = 2n * 10n ** 16n;       // 0.02 FLOW gross wrap
+  const FLOW_TRANSFER    = 5n * 10n ** 15n;        // 0.005 FLOW to Bob
   const MUSDC_WRAP       = AMOUNTS.TEN_MUSDC;     // 10 mUSDC
   const MUSDC_TRANSFER   = AMOUNTS.THREE_MUSDC;   // 3 mUSDC to Carol
 
@@ -102,9 +102,9 @@ describe("E2E: multi-token — FLOW to Bob, mUSDC to Carol", () => {
     skipIfNotE2E();
 
     const alice = makeAlice(); // deployer — funding and minting only
-    sender = await createFundedAccount("0.03"); // more FLOW for two wraps + gas
-    bob    = await createFundedAccount("0.01");
-    carol  = await createFundedAccount("0.01");
+    sender = await createFundedAccount("0.08"); // gas for 7 txs + FLOW wrap (recovered negligible)
+    bob    = await createFundedAccount("0.005");
+    carol  = await createFundedAccount("0.005");
 
     senderJub = await deriveMemoJub(sender.address, "e2e-multi:sender:v1");
     bobJub    = await deriveMemoJub(bob.address,    "e2e-multi:bob:v1");

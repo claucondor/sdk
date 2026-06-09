@@ -74,8 +74,8 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
 
     // Deployer (Alice) funds fresh accounts
     const alice = makeAlice();
-    sender = await createFundedAccount("0.02");
-    bob    = await createFundedAccount("0.01");
+    sender = await createFundedAccount("0.06"); // gas (0.04) + wrap (0.1) recovered via unwrap
+    bob    = await createFundedAccount("0.005");
 
     senderJub = await deriveMemoJub(sender.address, "e2e-flow:sender:v1");
     bobJub    = await deriveMemoJub(bob.address,    "e2e-flow:bob:v1");
