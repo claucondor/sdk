@@ -4,8 +4,12 @@
  * Integration tests for JanusERC20Adapter — full wrap → transfer → drain → decode → unwrap
  * lifecycle for MockUSDC (mUSDC) against deployed v0.8 testnet contracts.
  *
+ * Uses a FRESH sender account (not the deployer) to avoid C_old mismatch from prior
+ * test runs that may have left stale commitment state on the deployer address.
+ * The deployer (Alice) is ONLY used to mint mUSDC and fund fresh accounts.
+ *
  * Approach:
- *   - Minting: Alice (deployer) mints mUSDC to herself via direct ethers contract call.
+ *   - Mint: Deployer (Alice) mints mUSDC directly to the fresh sender address.
  *   - Approve: uses adapter.approveUnderlying() — SDK adapter method.
  *   - Wrap step: uses orchestrateWrap (SDK proof builder) + direct ethers submit
  *     to capture blinding (adapter.wrap() does not expose blinding in WrapResult).
@@ -27,6 +31,7 @@ import {
   JANUS_ERC20_ABI,
   MOCK_USDC_ABI,
   ONE_MUSDC,
+  TEN_MUSDC,
   HUNDRED_MUSDC,
   splitProofForEvm,
 } from "../helpers/testnet";
@@ -43,37 +48,39 @@ describe("JanusERC20Adapter — integration (mUSDC)", () => {
   const adapter     = new JanusERC20Adapter("mockusdc", TOKEN_REGISTRY.mockusdc);
   const inboxClient = new ShieldedInboxClient();
 
-  let alice: ReturnType<typeof makeDeployerWallet>;
-  let bob:   Awaited<ReturnType<typeof createFreshBob>>;
+  let alice:  ReturnType<typeof makeDeployerWallet>;   // deployer — minting only
+  let sender: Awaited<ReturnType<typeof createFreshBob>>;  // fresh sender — avoids C_old
+  let bob:    Awaited<ReturnType<typeof createFreshBob>>;
 
-  let aliceJub: Awaited<ReturnType<typeof deriveMemoKeypair>>;
-  let bobJub:   Awaited<ReturnType<typeof deriveMemoKeypair>>;
+  let senderJub: Awaited<ReturnType<typeof deriveMemoKeypair>>;
+  let bobJub:    Awaited<ReturnType<typeof deriveMemoKeypair>>;
 
   // Mutable state captured across tests
-  let aliceBalance:  bigint;
-  let aliceBlinding: bigint;
+  let senderBalance:  bigint;
+  let senderBlinding: bigint;
 
   // Use 10 mUSDC gross wrap amount; transfer 3 mUSDC to Bob
-  const GROSS_AMOUNT    = 10n * ONE_MUSDC;  // 10 mUSDC
-  const TRANSFER_AMOUNT = 3n  * ONE_MUSDC;  // 3 mUSDC
+  const GROSS_AMOUNT    = TEN_MUSDC;    // 10 mUSDC
+  const TRANSFER_AMOUNT = 3n * ONE_MUSDC; // 3 mUSDC
   const MEMO_TEXT       = "janus-erc20-adapter-integration";
 
   beforeAll(async () => {
     if (SKIP) return;
     skipIfNotIntegration();
 
-    alice = makeDeployerWallet();
-    bob   = await createFreshBob("0.05");
+    alice  = makeDeployerWallet();
+    sender = await createFreshBob("0.02"); // fresh account with gas for ERC20 txs
+    bob    = await createFreshBob("0.01");
 
-    aliceJub = await deriveMemoKeypair(alice.address, "janus-erc20-adapter-test:alice");
-    bobJub   = await deriveMemoKeypair(bob.address,   "janus-erc20-adapter-test:bob");
+    senderJub = await deriveMemoKeypair(sender.address, "janus-erc20-adapter-test:sender");
+    bobJub    = await deriveMemoKeypair(bob.address,    "janus-erc20-adapter-test:bob");
 
-    // Ensure both have memokeys published via adapter SDK methods
-    const aliceKey = await adapter.getMemoKey(alice.address);
-    if (!aliceKey) {
-      await adapter.publishMemoKey(aliceJub, alice);
-    } else if (aliceKey.x !== aliceJub.pubkey.x || aliceKey.y !== aliceJub.pubkey.y) {
-      await adapter.rotateMemoKey(aliceJub, alice);
+    // Publish memokeys via adapter SDK methods
+    const senderKey = await adapter.getMemoKey(sender.address);
+    if (!senderKey) {
+      await adapter.publishMemoKey(senderJub, sender.wallet);
+    } else if (senderKey.x !== senderJub.pubkey.x || senderKey.y !== senderJub.pubkey.y) {
+      await adapter.rotateMemoKey(senderJub, sender.wallet);
     }
 
     const bobKey = await adapter.getMemoKey(bob.address);
@@ -84,33 +91,34 @@ describe("JanusERC20Adapter — integration (mUSDC)", () => {
     // Drain Bob's inbox to start clean
     const bobCount = await inboxClient.count(bob.address);
     if (bobCount > 0n) {
-      console.log(`[JanusERC20] Pre-draining ${bobCount} leftover notes from Bob's inbox`);
+      console.log(`[JanusERC20] Pre-draining ${bobCount} leftover notes from Bob`);
       await inboxClient.drainAll(bob.wallet);
     }
 
-    console.log(`[JanusERC20] Alice: ${alice.address}`);
-    console.log(`[JanusERC20] Bob:   ${bob.address} (funded: ${bob.fundTxHash})`);
+    console.log(`[JanusERC20] Deployer (Alice): ${alice.address}`);
+    console.log(`[JanusERC20] Sender (fresh):   ${sender.address} (${sender.fundTxHash})`);
+    console.log(`[JanusERC20] Bob:               ${bob.address} (${bob.fundTxHash})`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Step 1 — Mint + Approve mUSDC
+  // Step 1 — Mint mUSDC to Sender + Approve JanusERC20 proxy
   // ---------------------------------------------------------------------------
 
-  it("should mint 100 mUSDC to Alice and approve JanusERC20 proxy", async () => {
+  it("should mint 100 mUSDC to fresh Sender and approve JanusERC20 proxy", async () => {
     if (SKIP) return;
 
-    // Mint 100 mUSDC to Alice (deployer owns MockUSDC mint function)
+    // Mint 100 mUSDC to Sender (deployer Alice owns MockUSDC mint)
     const mockUSDC = new ethers.Contract(ADDRESSES.mockUSDC, MOCK_USDC_ABI, alice);
-    const mintTx   = await mockUSDC.mint(alice.address, HUNDRED_MUSDC);
+    const mintTx   = await mockUSDC.mint(sender.address, HUNDRED_MUSDC);
     await mintTx.wait(1);
     console.log(`[JanusERC20] mint tx: ${mintTx.hash}`);
 
-    const balance = await adapter.getBalance(alice.address);
+    const balance = await adapter.getBalance(sender.address);
     expect(balance).toBeGreaterThanOrEqual(GROSS_AMOUNT);
-    console.log(`[JanusERC20] Alice mUSDC balance: ${balance}`);
+    console.log(`[JanusERC20] Sender mUSDC balance: ${balance}`);
 
-    // Approve via adapter SDK method
-    const { txHash } = await adapter.approveUnderlying(GROSS_AMOUNT, alice);
+    // Approve via adapter SDK method (Sender pays gas)
+    const { txHash } = await adapter.approveUnderlying(GROSS_AMOUNT, sender.wallet);
     expect(txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
     console.log(`[JanusERC20] approve tx: ${txHash}`);
   }, 90_000);
@@ -126,10 +134,10 @@ describe("JanusERC20Adapter — integration (mUSDC)", () => {
     const orchWrap = await orchestrateWrap({
       grossAmount:       GROSS_AMOUNT,
       feeBps,
-      senderMemoKeypair: { privkey: 0n, pubkey: aliceJub.pubkey },
+      senderMemoKeypair: { privkey: 0n, pubkey: senderJub.pubkey },
     });
 
-    const janusERC20 = new ethers.Contract(ADDRESSES.janusERC20, JANUS_ERC20_ABI, alice);
+    const janusERC20 = new ethers.Contract(ADDRESSES.janusERC20, JANUS_ERC20_ABI, sender.wallet);
     const { pA, pB, pC } = splitProofForEvm(orchWrap.amountProof);
 
     const wrapTx = await janusERC20.wrapWithProof(
@@ -143,13 +151,13 @@ describe("JanusERC20Adapter — integration (mUSDC)", () => {
     );
     await wrapTx.wait(1);
 
-    aliceBalance  = orchWrap.netAmount;
-    aliceBlinding = orchWrap.blinding;
+    senderBalance  = orchWrap.netAmount;
+    senderBlinding = orchWrap.blinding;
 
     expect(wrapTx.hash).toMatch(/^0x[0-9a-fA-F]{64}$/);
-    expect(aliceBalance).toBeGreaterThan(0n);
-    expect(aliceBlinding).toBeGreaterThan(0n);
-    console.log(`[JanusERC20] wrap tx: ${wrapTx.hash}, netAmount: ${aliceBalance}`);
+    expect(senderBalance).toBeGreaterThan(0n);
+    expect(senderBlinding).toBeGreaterThan(0n);
+    console.log(`[JanusERC20] wrap tx: ${wrapTx.hash}, netAmount: ${senderBalance}`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
@@ -166,10 +174,10 @@ describe("JanusERC20Adapter — integration (mUSDC)", () => {
         recipient:       bob.address,
         amount:          TRANSFER_AMOUNT,
         memo:            MEMO_TEXT,
-        currentBalance:  aliceBalance,
-        currentBlinding: aliceBlinding,
+        currentBalance:  senderBalance,
+        currentBlinding: senderBlinding,
       },
-      alice,
+      sender.wallet,
     );
 
     expect(sendResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
@@ -177,14 +185,14 @@ describe("JanusERC20Adapter — integration (mUSDC)", () => {
     expect(sendResult.newBlinding).toBeDefined();
     expect(sendResult.checkpointPayload).toBeDefined();
 
-    aliceBalance  = sendResult.newBalance!;
-    aliceBlinding = sendResult.newBlinding!;
+    senderBalance  = sendResult.newBalance!;
+    senderBlinding = sendResult.newBlinding!;
 
     const bobCountAfter = await inboxClient.count(bob.address);
     expect(bobCountAfter).toBe(bobCountBefore + 1n);
 
     console.log(`[JanusERC20] shieldedTransfer tx: ${sendResult.txHash}`);
-    console.log(`[JanusERC20] Alice remaining: ${aliceBalance}, Bob inbox: ${bobCountAfter}`);
+    console.log(`[JanusERC20] Sender remaining: ${senderBalance}, Bob inbox: ${bobCountAfter}`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
@@ -219,35 +227,35 @@ describe("JanusERC20Adapter — integration (mUSDC)", () => {
   }, 90_000);
 
   // ---------------------------------------------------------------------------
-  // Step 5 — Alice unwraps remaining mUSDC balance via adapter.unwrap()
+  // Step 5 — Sender unwraps remaining mUSDC balance via adapter.unwrap()
   // ---------------------------------------------------------------------------
 
   it("should unwrap remaining mUSDC via adapter.unwrap() SDK method", async () => {
     if (SKIP) return;
 
-    const balanceBefore = await adapter.getBalance(alice.address);
+    const balanceBefore = await adapter.getBalance(sender.address);
 
     const unwrapResult = await adapter.unwrap(
       {
-        claimedAmount:   aliceBalance,
-        recipient:       alice.address,
-        currentBalance:  aliceBalance,
-        currentBlinding: aliceBlinding,
+        claimedAmount:   senderBalance,
+        recipient:       sender.address,
+        currentBalance:  senderBalance,
+        currentBlinding: senderBlinding,
       },
-      alice,
+      sender.wallet,
     );
 
     expect(unwrapResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
     expect(unwrapResult.netToRecipient).toBeGreaterThan(0n);
 
-    const balanceAfter = await adapter.getBalance(alice.address);
+    const balanceAfter = await adapter.getBalance(sender.address);
     expect(balanceAfter).toBeGreaterThan(balanceBefore);
 
     console.log(
       `[JanusERC20] unwrap tx: ${unwrapResult.txHash}, ` +
       `netToRecipient: ${unwrapResult.netToRecipient} (${unwrapResult.netToRecipient / ONE_MUSDC} mUSDC)`
     );
-    console.log(`[JanusERC20] Alice mUSDC delta: ${balanceAfter - balanceBefore}`);
+    console.log(`[JanusERC20] Sender mUSDC delta: ${balanceAfter - balanceBefore}`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------

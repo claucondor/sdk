@@ -25,7 +25,7 @@ import {
   skipIfNotIntegration,
   ADDRESSES,
   JANUS_FLOW_ABI,
-  ONE_FLOW,
+  TINY_FLOW,
   splitProofForEvm,
 } from "../helpers/testnet";
 import {
@@ -57,7 +57,7 @@ describe("ShieldedInboxClient — integration", () => {
     skipIfNotIntegration();
 
     alice = makeDeployerWallet();
-    bob   = await createFreshBob("0.2");
+    bob   = await createFreshBob("0.01");
 
     aliceJub = await deriveMemoKeypair(alice.address, "inbox-test:alice");
     bobJub   = await deriveMemoKeypair(bob.address,   "inbox-test:bob");
@@ -127,7 +127,7 @@ describe("ShieldedInboxClient — integration", () => {
     // Use orchestrateWrap to capture blinding (needed for subsequent transfer)
     const feeBps = await adapter.feeBps();
     const orchWrap = await orchestrateWrap({
-      grossAmount:      ONE_FLOW,
+      grossAmount:      TINY_FLOW,
       feeBps,
       senderMemoKeypair: { privkey: 0n, pubkey: aliceJub.pubkey },
     });
@@ -146,7 +146,7 @@ describe("ShieldedInboxClient — integration", () => {
       ethers.hexlify(orchWrap.encryptedSnapshot),
       orchWrap.ephPubkeyX,
       orchWrap.ephPubkeyY,
-      { value: ONE_FLOW }
+      { value: TINY_FLOW }
     );
     await wrapTx.wait(1);
     console.log(`[Inbox] Alice wrap tx: ${wrapTx.hash}`);
@@ -274,10 +274,10 @@ describe("ShieldedInboxClient — integration", () => {
 
     // Alice has remaining balance from previous transfer
     if (aliceBalance === 0n) {
-      console.log("[Inbox] Alice balance is 0, wrapping fresh 1 FLOW");
+      console.log("[Inbox] Alice balance is 0, wrapping fresh 0.02 FLOW");
       const feeBps = await adapter.feeBps();
       const orchWrap = await orchestrateWrap({
-        grossAmount:      ONE_FLOW,
+        grossAmount:      TINY_FLOW,
         feeBps,
         senderMemoKeypair: { privkey: 0n, pubkey: aliceJub.pubkey },
       });
@@ -289,7 +289,7 @@ describe("ShieldedInboxClient — integration", () => {
         ethers.hexlify(orchWrap.encryptedSnapshot),
         orchWrap.ephPubkeyX,
         orchWrap.ephPubkeyY,
-        { value: ONE_FLOW }
+        { value: TINY_FLOW }
       );
       await wrapTx.wait(1);
       aliceBalance  = orchWrap.netAmount;

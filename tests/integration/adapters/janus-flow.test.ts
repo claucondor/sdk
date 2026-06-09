@@ -4,6 +4,9 @@
  * Integration tests for JanusFlowAdapter — full wrap → transfer → drain → decode → unwrap
  * lifecycle against deployed v0.8 testnet contracts.
  *
+ * Uses a FRESH sender account (not the deployer) to avoid C_old mismatch from
+ * prior test runs that may have left stale commitment state on the deployer address.
+ *
  * Approach:
  *   - Wrap step: uses orchestrateWrap (SDK proof builder) + direct ethers contract submit
  *     to capture blinding (adapter.wrap() does not expose blinding in WrapResult).
@@ -23,7 +26,8 @@ import {
   skipIfNotIntegration,
   ADDRESSES,
   JANUS_FLOW_ABI,
-  ONE_FLOW,
+  TINY_FLOW,
+  MICRO_FLOW,
   splitProofForEvm,
   provider,
 } from "../helpers/testnet";
@@ -42,35 +46,39 @@ describe("JanusFlowAdapter — integration", () => {
   const inboxClient      = new ShieldedInboxClient();
   const checkpointClient = new ShieldedCheckpointClient();
 
-  let alice: ReturnType<typeof makeDeployerWallet>;
-  let bob:   Awaited<ReturnType<typeof createFreshBob>>;
+  // Use fresh random sender (not deployer) to avoid C_old mismatch with prior runs.
+  let sender:  Awaited<ReturnType<typeof createFreshBob>>;
+  let bob:     Awaited<ReturnType<typeof createFreshBob>>;
 
-  let aliceJub: Awaited<ReturnType<typeof deriveMemoKeypair>>;
-  let bobJub:   Awaited<ReturnType<typeof deriveMemoKeypair>>;
+  let senderJub: Awaited<ReturnType<typeof deriveMemoKeypair>>;
+  let bobJub:    Awaited<ReturnType<typeof deriveMemoKeypair>>;
 
   // Mutable state captured across tests
-  let aliceBalance:  bigint;
-  let aliceBlinding: bigint;
+  let senderBalance:  bigint;
+  let senderBlinding: bigint;
 
-  const TRANSFER_AMOUNT = 3n * 10n ** 17n; // 0.3 FLOW
-  const MEMO_TEXT = "janus-flow-adapter-integration";
+  // Use tiny amounts to stay within testnet FLOW budget
+  const WRAP_AMOUNT     = TINY_FLOW;                // 0.02 FLOW gross
+  const TRANSFER_AMOUNT = MICRO_FLOW;               // 0.005 FLOW
+  const MEMO_TEXT       = "janus-flow-adapter-integration";
 
   beforeAll(async () => {
     if (SKIP) return;
     skipIfNotIntegration();
 
-    alice = makeDeployerWallet();
-    bob   = await createFreshBob("0.1");
+    // Fund sender and bob from deployer wallet (small amounts to save budget)
+    sender = await createFreshBob("0.02");
+    bob    = await createFreshBob("0.01");
 
-    aliceJub = await deriveMemoKeypair(alice.address, "janus-flow-adapter-test:alice");
-    bobJub   = await deriveMemoKeypair(bob.address,   "janus-flow-adapter-test:bob");
+    senderJub = await deriveMemoKeypair(sender.address, "janus-flow-adapter-test:sender");
+    bobJub    = await deriveMemoKeypair(bob.address,    "janus-flow-adapter-test:bob");
 
-    // Ensure both have published memokeys via adapter SDK methods
-    const aliceKey = await adapter.getMemoKey(alice.address);
-    if (!aliceKey) {
-      await adapter.publishMemoKey(aliceJub, alice);
-    } else if (aliceKey.x !== aliceJub.pubkey.x || aliceKey.y !== aliceJub.pubkey.y) {
-      await adapter.rotateMemoKey(aliceJub, alice);
+    // Publish memokeys via adapter SDK methods (sender pays its own gas)
+    const senderKey = await adapter.getMemoKey(sender.address);
+    if (!senderKey) {
+      await adapter.publishMemoKey(senderJub, sender.wallet);
+    } else if (senderKey.x !== senderJub.pubkey.x || senderKey.y !== senderJub.pubkey.y) {
+      await adapter.rotateMemoKey(senderJub, sender.wallet);
     }
 
     const bobKey = await adapter.getMemoKey(bob.address);
@@ -81,29 +89,29 @@ describe("JanusFlowAdapter — integration", () => {
     // Drain Bob's inbox to start clean
     const bobCount = await inboxClient.count(bob.address);
     if (bobCount > 0n) {
-      console.log(`[JanusFlow] Pre-draining ${bobCount} leftover notes from Bob's inbox`);
+      console.log(`[JanusFlow] Pre-draining ${bobCount} leftover notes from Bob`);
       await inboxClient.drainAll(bob.wallet);
     }
 
-    console.log(`[JanusFlow] Alice: ${alice.address}`);
-    console.log(`[JanusFlow] Bob:   ${bob.address} (funded: ${bob.fundTxHash})`);
+    console.log(`[JanusFlow] Sender: ${sender.address} (fresh, funded: ${sender.fundTxHash})`);
+    console.log(`[JanusFlow] Bob:    ${bob.address} (funded: ${bob.fundTxHash})`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Step 1 — Wrap 1 FLOW (orchestrateWrap + direct contract to capture blinding)
+  // Step 1 — Wrap 0.02 FLOW (orchestrateWrap + direct contract to capture blinding)
   // ---------------------------------------------------------------------------
 
-  it("should wrap 1 FLOW via SDK orchestrateWrap + submit to JanusFlow", async () => {
+  it("should wrap 0.02 FLOW via SDK orchestrateWrap + submit to JanusFlow", async () => {
     if (SKIP) return;
 
     const feeBps = await adapter.feeBps();
     const orchWrap = await orchestrateWrap({
-      grossAmount:       ONE_FLOW,
+      grossAmount:       WRAP_AMOUNT,
       feeBps,
-      senderMemoKeypair: { privkey: 0n, pubkey: aliceJub.pubkey },
+      senderMemoKeypair: { privkey: 0n, pubkey: senderJub.pubkey },
     });
 
-    const janusFlow = new ethers.Contract(ADDRESSES.janusFlow, JANUS_FLOW_ABI, alice);
+    const janusFlow = new ethers.Contract(ADDRESSES.janusFlow, JANUS_FLOW_ABI, sender.wallet);
     const { pA, pB, pC } = splitProofForEvm(orchWrap.amountProof);
 
     const wrapTx = await janusFlow.wrapWithProof(
@@ -113,24 +121,24 @@ describe("JanusFlowAdapter — integration", () => {
       ethers.hexlify(orchWrap.encryptedSnapshot),
       orchWrap.ephPubkeyX,
       orchWrap.ephPubkeyY,
-      { value: ONE_FLOW }
+      { value: WRAP_AMOUNT }
     );
     await wrapTx.wait(1);
 
-    aliceBalance  = orchWrap.netAmount;
-    aliceBlinding = orchWrap.blinding;
+    senderBalance  = orchWrap.netAmount;
+    senderBlinding = orchWrap.blinding;
 
     expect(wrapTx.hash).toMatch(/^0x[0-9a-fA-F]{64}$/);
-    expect(aliceBalance).toBeGreaterThan(0n);
-    expect(aliceBlinding).toBeGreaterThan(0n);
-    console.log(`[JanusFlow] wrap tx: ${wrapTx.hash}, netAmount: ${aliceBalance}`);
+    expect(senderBalance).toBeGreaterThan(0n);
+    expect(senderBlinding).toBeGreaterThan(0n);
+    console.log(`[JanusFlow] wrap tx: ${wrapTx.hash}, netAmount: ${senderBalance}`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Step 2 — shieldedTransfer 0.3 FLOW to Bob via adapter.shieldedTransfer()
+  // Step 2 — shieldedTransfer 0.005 FLOW to Bob via adapter.shieldedTransfer()
   // ---------------------------------------------------------------------------
 
-  it("should shieldedTransfer 0.3 FLOW to Bob via adapter SDK method", async () => {
+  it("should shieldedTransfer to Bob via adapter SDK method", async () => {
     if (SKIP) return;
 
     const bobCountBefore = await inboxClient.count(bob.address);
@@ -140,10 +148,10 @@ describe("JanusFlowAdapter — integration", () => {
         recipient:       bob.address,
         amount:          TRANSFER_AMOUNT,
         memo:            MEMO_TEXT,
-        currentBalance:  aliceBalance,
-        currentBlinding: aliceBlinding,
+        currentBalance:  senderBalance,
+        currentBlinding: senderBlinding,
       },
-      alice,
+      sender.wallet,
     );
 
     expect(sendResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
@@ -152,32 +160,29 @@ describe("JanusFlowAdapter — integration", () => {
     expect(sendResult.checkpointPayload).toBeDefined();
 
     // Update state for subsequent tests
-    aliceBalance  = sendResult.newBalance!;
-    aliceBlinding = sendResult.newBlinding!;
+    senderBalance  = sendResult.newBalance!;
+    senderBlinding = sendResult.newBlinding!;
 
     // Bob's inbox should have grown
     const bobCountAfter = await inboxClient.count(bob.address);
     expect(bobCountAfter).toBe(bobCountBefore + 1n);
 
     console.log(`[JanusFlow] shieldedTransfer tx: ${sendResult.txHash}`);
-    console.log(`[JanusFlow] Alice remaining: ${aliceBalance}, Bob inbox: ${bobCountAfter}`);
+    console.log(`[JanusFlow] Sender remaining: ${senderBalance}, Bob inbox: ${bobCountAfter}`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Step 3 — Store Alice's checkpoint via ShieldedCheckpointClient
+  // Step 3 — Store sender's checkpoint via ShieldedCheckpointClient
   // ---------------------------------------------------------------------------
 
-  it("should write Alice's checkpoint after transfer via SDK", async () => {
+  it("should write sender checkpoint after transfer via SDK", async () => {
     if (SKIP) return;
 
-    // Reconstruct checkpoint payload from shieldedTransfer result
-    // (checkpointPayload is returned by adapter.shieldedTransfer)
-    // For simplicity, use encryptAndUpdate with the current balance/blinding
     const { txHash, version } = await checkpointClient.encryptAndUpdate(
-      { balance: aliceBalance, blinding: aliceBlinding },
+      { balance: senderBalance, blinding: senderBlinding },
       1n, // consumed 1 inbox note cursor
-      aliceJub,
-      alice,
+      senderJub,
+      sender.wallet,
     );
 
     expect(txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
@@ -185,10 +190,10 @@ describe("JanusFlowAdapter — integration", () => {
     console.log(`[JanusFlow] checkpoint update tx: ${txHash}, v=${version}`);
 
     // Verify round-trip
-    const snap = await checkpointClient.readAndDecrypt(alice, aliceJub.privkey);
+    const snap = await checkpointClient.readAndDecrypt(sender.wallet, senderJub.privkey);
     expect(snap).not.toBeNull();
-    expect(snap!.balance).toBe(aliceBalance);
-    expect(snap!.blinding).toBe(aliceBlinding);
+    expect(snap!.balance).toBe(senderBalance);
+    expect(snap!.blinding).toBe(senderBlinding);
   }, 90_000);
 
   // ---------------------------------------------------------------------------
@@ -222,30 +227,29 @@ describe("JanusFlowAdapter — integration", () => {
   }, 90_000);
 
   // ---------------------------------------------------------------------------
-  // Step 5 — Alice unwraps remaining balance via adapter.unwrap()
+  // Step 5 — Sender unwraps remaining balance via adapter.unwrap()
   // ---------------------------------------------------------------------------
 
   it("should unwrap remaining balance via adapter.unwrap() SDK method", async () => {
     if (SKIP) return;
 
-    const balanceBefore = await provider.getBalance(alice.address);
+    const balanceBefore = await provider.getBalance(sender.address);
 
     const unwrapResult = await adapter.unwrap(
       {
-        claimedAmount:   aliceBalance,
-        recipient:       alice.address,
-        currentBalance:  aliceBalance,
-        currentBlinding: aliceBlinding,
+        claimedAmount:   senderBalance,
+        recipient:       sender.address,
+        currentBalance:  senderBalance,
+        currentBlinding: senderBlinding,
       },
-      alice,
+      sender.wallet,
     );
 
     expect(unwrapResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
     expect(unwrapResult.netToRecipient).toBeGreaterThan(0n);
 
-    const balanceAfter = await provider.getBalance(alice.address);
+    const balanceAfter = await provider.getBalance(sender.address);
     // Balance should have increased (net claim minus gas cost)
-    // Allow up to 0.01 FLOW in gas loss
     const gasAllowance = 10n ** 16n;
     expect(balanceAfter + gasAllowance).toBeGreaterThan(balanceBefore);
 
@@ -253,7 +257,7 @@ describe("JanusFlowAdapter — integration", () => {
       `[JanusFlow] unwrap tx: ${unwrapResult.txHash}, ` +
       `netToRecipient: ${unwrapResult.netToRecipient}`
     );
-    console.log(`[JanusFlow] Alice balance delta: ${balanceAfter - balanceBefore}`);
+    console.log(`[JanusFlow] Sender balance delta: ${balanceAfter - balanceBefore}`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------

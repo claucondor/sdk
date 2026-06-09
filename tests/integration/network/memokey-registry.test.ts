@@ -41,7 +41,7 @@ describe("MemoKeyRegistry — integration", () => {
     skipIfNotIntegration();
 
     alice = makeDeployerWallet();
-    bob   = await createFreshBob("0.1");
+    bob   = await createFreshBob("0.01");
 
     // Derive deterministic BabyJub keypairs for both
     aliceJub    = await deriveMemoKeypair(alice.address, "memokey-registry-test:v1");

@@ -3,13 +3,17 @@
  *
  * Full FLOW lifecycle via SDK public API only.
  *
+ * Uses a FRESH sender account (not the deployer) to avoid C_old mismatch from
+ * prior integration tests that may have left stale commitment state on the
+ * deployer address. The deployer only funds fresh accounts.
+ *
  * Protocol:
- *   1. Alice + Bob created and funded via helpers
+ *   1. Fresh sender + Bob funded via deployer
  *   2. Both publish memokeys via sdk.token('flow')
- *   3. Alice wraps 1 FLOW via orchestrateWrap + adapter.wrap() (blinding captured from event)
- *   4. Alice shieldedTransfers 0.3 FLOW to Bob via sdk.token('flow').shieldedTransfer()
+ *   3. Sender wraps 0.02 FLOW via adapter.wrap() + parse event to recover blinding
+ *   4. Sender shieldedTransfers 0.005 FLOW to Bob via sdk.token('flow').shieldedTransfer()
  *   5. Bob drains inbox via ShieldedInboxClient and decodes note
- *   6. Alice unwraps remaining balance via sdk.token('flow').unwrap()
+ *   6. Sender unwraps remaining balance via sdk.token('flow').unwrap()
  *
  * Blinding recovery after wrap:
  *   adapter.wrap() does not return blinding. We recover it by parsing the
@@ -49,34 +53,39 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
   const checkpointClient = new ShieldedCheckpointClient();
   const provider         = makeProvider();
 
-  let alice: ReturnType<typeof makeAlice>;
-  let bob:   Awaited<ReturnType<typeof createFundedAccount>>;
+  // Use fresh sender (not deployer) to avoid C_old mismatch
+  let sender: Awaited<ReturnType<typeof createFundedAccount>>;
+  let bob:    Awaited<ReturnType<typeof createFundedAccount>>;
 
-  let aliceJub: Awaited<ReturnType<typeof deriveMemoJub>>;
-  let bobJub:   Awaited<ReturnType<typeof deriveMemoJub>>;
+  let senderJub: Awaited<ReturnType<typeof deriveMemoJub>>;
+  let bobJub:    Awaited<ReturnType<typeof deriveMemoJub>>;
 
-  let aliceBalance:  bigint;
-  let aliceBlinding: bigint;
+  let senderBalance:  bigint;
+  let senderBlinding: bigint;
 
-  const TRANSFER_AMOUNT = AMOUNTS.POINT3_FLOW;
+  // Small amounts to stay within testnet FLOW budget
+  const WRAP_AMOUNT     = AMOUNTS.POINT1_FLOW;       // 0.1 FLOW (recovered via unwrap)
+  const TRANSFER_AMOUNT = 5n * 10n ** 15n;            // 0.005 FLOW
   const MEMO_TEXT       = "e2e-flow-lifecycle-test";
 
   beforeAll(async () => {
     if (SKIP) return;
     skipIfNotE2E();
 
-    alice = makeAlice();
-    bob   = await createFundedAccount("0.1");
+    // Deployer (Alice) funds fresh accounts
+    const alice = makeAlice();
+    sender = await createFundedAccount("0.02");
+    bob    = await createFundedAccount("0.01");
 
-    aliceJub = await deriveMemoJub(alice.address, "e2e-flow:alice:v1");
-    bobJub   = await deriveMemoJub(bob.address,   "e2e-flow:bob:v1");
+    senderJub = await deriveMemoJub(sender.address, "e2e-flow:sender:v1");
+    bobJub    = await deriveMemoJub(bob.address,    "e2e-flow:bob:v1");
 
-    // Publish memokeys via SDK adapter
-    const aliceKey = await flowAdapter.getMemoKey(alice.address);
-    if (!aliceKey) {
-      await flowAdapter.publishMemoKey(aliceJub, alice);
-    } else if (aliceKey.x !== aliceJub.pubkey.x || aliceKey.y !== aliceJub.pubkey.y) {
-      await flowAdapter.rotateMemoKey(aliceJub, alice);
+    // Publish memokeys via SDK adapter (sender and bob pay their own gas)
+    const senderKey = await flowAdapter.getMemoKey(sender.address);
+    if (!senderKey) {
+      await flowAdapter.publishMemoKey(senderJub, sender.wallet);
+    } else if (senderKey.x !== senderJub.pubkey.x || senderKey.y !== senderJub.pubkey.y) {
+      await flowAdapter.rotateMemoKey(senderJub, sender.wallet);
     }
 
     const bobKey = await flowAdapter.getMemoKey(bob.address);
@@ -91,20 +100,20 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
       await inboxClient.drainAll(bob.wallet);
     }
 
-    console.log(`[E2E:FLOW] Alice: ${alice.address}`);
-    console.log(`[E2E:FLOW] Bob:   ${bob.address} (${bob.fundTxHash})`);
+    console.log(`[E2E:FLOW] Sender (fresh): ${sender.address} (${sender.fundTxHash})`);
+    console.log(`[E2E:FLOW] Bob (fresh):    ${bob.address} (${bob.fundTxHash})`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Step 1 — wrap 1 FLOW via adapter.wrap() + parse event to recover blinding
+  // Step 1 — wrap via adapter.wrap() + parse event to recover blinding
   // ---------------------------------------------------------------------------
 
-  it("should wrap 1 FLOW and recover blinding from WrapWithSnapshot event", async () => {
+  it("should wrap FLOW and recover blinding from WrapWithSnapshot event", async () => {
     if (SKIP) return;
 
     const wrapResult = await flowAdapter.wrap(
-      { grossAmount: AMOUNTS.ONE_FLOW },
-      alice,
+      { grossAmount: WRAP_AMOUNT },
+      sender.wallet,
     );
 
     expect(wrapResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
@@ -129,16 +138,16 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
           const snap = await flowAdapter.decryptSnapshot(
             encBytes,
             { x: ephX, y: ephY },
-            aliceJub.privkey,
+            senderJub.privkey,
           );
 
           expect(snap.balance).toBeGreaterThan(0n);
           expect(snap.blinding).toBeGreaterThan(0n);
 
-          aliceBalance  = snap.balance;
-          aliceBlinding = snap.blinding;
+          senderBalance  = snap.balance;
+          senderBlinding = snap.blinding;
           snapshotDecrypted = true;
-          console.log(`[E2E:FLOW] recovered balance: ${snap.balance}, blinding: ${snap.blinding.toString().slice(0,20)}...`);
+          console.log(`[E2E:FLOW] recovered balance: ${snap.balance}`);
           break;
         }
       } catch {
@@ -147,14 +156,14 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
     }
 
     expect(snapshotDecrypted).toBe(true);
-    expect(aliceBalance).toBe(wrapResult.netAmount);
+    expect(senderBalance).toBe(wrapResult.netAmount);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Step 2 — shieldedTransfer 0.3 FLOW to Bob via SDK adapter
+  // Step 2 — shieldedTransfer to Bob via SDK adapter
   // ---------------------------------------------------------------------------
 
-  it("should shieldedTransfer 0.3 FLOW to Bob via SDK adapter", async () => {
+  it("should shieldedTransfer to Bob via SDK adapter", async () => {
     if (SKIP) return;
 
     const bobCountBefore = await inboxClient.count(bob.address);
@@ -164,29 +173,29 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
         recipient:       bob.address,
         amount:          TRANSFER_AMOUNT,
         memo:            MEMO_TEXT,
-        currentBalance:  aliceBalance,
-        currentBlinding: aliceBlinding,
+        currentBalance:  senderBalance,
+        currentBlinding: senderBlinding,
       },
-      alice,
+      sender.wallet,
     );
 
     expect(sendResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
     expect(sendResult.newBalance).toBeDefined();
     expect(sendResult.newBlinding).toBeDefined();
 
-    aliceBalance  = sendResult.newBalance!;
-    aliceBlinding = sendResult.newBlinding!;
+    senderBalance  = sendResult.newBalance!;
+    senderBlinding = sendResult.newBlinding!;
 
     const bobCountAfter = await inboxClient.count(bob.address);
     expect(bobCountAfter).toBe(bobCountBefore + 1n);
 
-    // Update checkpoint via SDK
+    // Update checkpoint via ShieldedCheckpointClient
     if (sendResult.checkpointPayload) {
-      await checkpointClient.update(sendResult.checkpointPayload, 0n, alice);
+      await checkpointClient.update(sendResult.checkpointPayload, 0n, sender.wallet);
     }
 
     console.log(`[E2E:FLOW] transfer tx: ${sendResult.txHash}`);
-    console.log(`[E2E:FLOW] Alice remaining: ${aliceBalance}, Bob inbox: ${bobCountAfter}`);
+    console.log(`[E2E:FLOW] Sender remaining: ${senderBalance}, Bob inbox: ${bobCountAfter}`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
@@ -217,28 +226,28 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
   }, 90_000);
 
   // ---------------------------------------------------------------------------
-  // Step 4 — Alice unwraps remaining via SDK adapter
+  // Step 4 — Sender unwraps remaining via SDK adapter
   // ---------------------------------------------------------------------------
 
   it("should unwrap remaining FLOW via SDK adapter.unwrap()", async () => {
     if (SKIP) return;
 
-    const balanceBefore = await flowAdapter.getBalance(alice.address);
+    const balanceBefore = await flowAdapter.getBalance(sender.address);
 
     const unwrapResult = await flowAdapter.unwrap(
       {
-        claimedAmount:   aliceBalance,
-        recipient:       alice.address,
-        currentBalance:  aliceBalance,
-        currentBlinding: aliceBlinding,
+        claimedAmount:   senderBalance,
+        recipient:       sender.address,
+        currentBalance:  senderBalance,
+        currentBlinding: senderBlinding,
       },
-      alice,
+      sender.wallet,
     );
 
     expect(unwrapResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
     expect(unwrapResult.netToRecipient).toBeGreaterThan(0n);
 
-    const balanceAfter = await flowAdapter.getBalance(alice.address);
+    const balanceAfter = await flowAdapter.getBalance(sender.address);
     // Balance should increase by approximately netToRecipient minus gas
     const gasAllowance = 10n ** 16n; // 0.01 FLOW
     expect(balanceAfter + gasAllowance).toBeGreaterThan(balanceBefore);
@@ -250,13 +259,13 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Sanity: checkpoint metadata shows hasCheckpoint=true for Alice
+  // Sanity: checkpoint metadata shows hasCheckpoint=true for sender
   // ---------------------------------------------------------------------------
 
-  it("Alice should have a checkpoint on-chain", async () => {
+  it("sender should have a checkpoint on-chain", async () => {
     if (SKIP) return;
 
-    const meta = await checkpointClient.metadata(alice.address);
+    const meta = await checkpointClient.metadata(sender.address);
     expect(meta.hasCheckpoint).toBe(true);
     console.log(`[E2E:FLOW] checkpoint version=${meta.version}, cursor=${meta.lastConsumedNoteIndex}`);
   }, 15_000);

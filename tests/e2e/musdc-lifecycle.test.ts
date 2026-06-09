@@ -3,18 +3,18 @@
  *
  * Full mUSDC lifecycle via SDK public API only.
  *
+ * Uses a FRESH sender account (not the deployer) for all shielded mUSDC operations.
+ * The deployer only mints mUSDC to the fresh sender and funds gas accounts.
+ *
  * Protocol:
- *   1. Alice mints 100 mUSDC to herself (deployer owns MockUSDC mint)
- *   2. Alice approves JanusERC20 proxy via adapter.approveUnderlying()
- *   3. Alice wraps 10 mUSDC via adapter.wrap() + parse event to recover blinding
- *   4. Alice shieldedTransfers 3 mUSDC to Bob via sdk.token('mockusdc').shieldedTransfer()
+ *   1. Deployer mints 100 mUSDC to fresh sender
+ *   2. Sender approves JanusERC20 proxy via adapter.approveUnderlying()
+ *   3. Sender wraps 10 mUSDC via adapter.wrap() + parse event to recover blinding
+ *   4. Sender shieldedTransfers 3 mUSDC to Bob via sdk.token('mockusdc').shieldedTransfer()
  *   5. Bob drains inbox and decodes note
- *   6. Alice unwraps remaining 7 mUSDC via sdk.token('mockusdc').unwrap()
+ *   6. Sender unwraps remaining 7 mUSDC via sdk.token('mockusdc').unwrap()
  *
- * Blinding recovery: parsed from WrapWithSnapshot event (same approach as flow-lifecycle.test.ts).
- *
- * Note: MockUSDC mint is called via direct ethers.Interface + wallet.sendTransaction
- *   (no ethers.Contract instantiation), keeping E2E constraint intact.
+ * Blinding recovery: parsed from WrapWithSnapshot event + adapter.decryptSnapshot().
  *
  * Gated by RUN_E2E=1.
  */
@@ -42,23 +42,24 @@ const WRAP_WITH_SNAPSHOT_SIG =
   "event WrapWithSnapshot(address indexed user, uint256 amount, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY)";
 const wrapIface = new ethers.Interface([WRAP_WITH_SNAPSHOT_SIG]);
 
-// MockUSDC.mint ABI (only need this one function — not full Contract)
-const MINT_SIG     = "function mint(address to, uint256 amount)";
-const mintIface    = new ethers.Interface([MINT_SIG]);
+// MockUSDC.mint ABI (ethers.Interface, not ethers.Contract)
+const MINT_SIG  = "function mint(address to, uint256 amount)";
+const mintIface = new ethers.Interface([MINT_SIG]);
 
 describe("E2E: mUSDC full lifecycle via SDK public API", () => {
   const erc20Adapter = sdk.token("mockusdc");
   const inboxClient  = new ShieldedInboxClient();
   const provider     = makeProvider();
 
-  let alice: ReturnType<typeof makeAlice>;
-  let bob:   Awaited<ReturnType<typeof createFundedAccount>>;
+  // Fresh sender for shielded operations (clean slot, no prior C_old)
+  let sender: Awaited<ReturnType<typeof createFundedAccount>>;
+  let bob:    Awaited<ReturnType<typeof createFundedAccount>>;
 
-  let aliceJub: Awaited<ReturnType<typeof deriveMemoJub>>;
-  let bobJub:   Awaited<ReturnType<typeof deriveMemoJub>>;
+  let senderJub: Awaited<ReturnType<typeof deriveMemoJub>>;
+  let bobJub:    Awaited<ReturnType<typeof deriveMemoJub>>;
 
-  let aliceBalance:  bigint;
-  let aliceBlinding: bigint;
+  let senderBalance:  bigint;
+  let senderBlinding: bigint;
 
   const GROSS_WRAP      = AMOUNTS.TEN_MUSDC;     // 10 mUSDC
   const TRANSFER_AMOUNT = AMOUNTS.THREE_MUSDC;   // 3 mUSDC
@@ -68,18 +69,19 @@ describe("E2E: mUSDC full lifecycle via SDK public API", () => {
     if (SKIP) return;
     skipIfNotE2E();
 
-    alice = makeAlice();
-    bob   = await createFundedAccount("0.05");
+    const alice = makeAlice(); // deployer — minting only
+    sender = await createFundedAccount("0.02");
+    bob    = await createFundedAccount("0.01");
 
-    aliceJub = await deriveMemoJub(alice.address, "e2e-musdc:alice:v1");
-    bobJub   = await deriveMemoJub(bob.address,   "e2e-musdc:bob:v1");
+    senderJub = await deriveMemoJub(sender.address, "e2e-musdc:sender:v1");
+    bobJub    = await deriveMemoJub(bob.address,    "e2e-musdc:bob:v1");
 
     // Publish memokeys via SDK adapter methods
-    const aliceKey = await erc20Adapter.getMemoKey(alice.address);
-    if (!aliceKey) {
-      await erc20Adapter.publishMemoKey(aliceJub, alice);
-    } else if (aliceKey.x !== aliceJub.pubkey.x || aliceKey.y !== aliceJub.pubkey.y) {
-      await erc20Adapter.rotateMemoKey(aliceJub, alice);
+    const senderKey = await erc20Adapter.getMemoKey(sender.address);
+    if (!senderKey) {
+      await erc20Adapter.publishMemoKey(senderJub, sender.wallet);
+    } else if (senderKey.x !== senderJub.pubkey.x || senderKey.y !== senderJub.pubkey.y) {
+      await erc20Adapter.rotateMemoKey(senderJub, sender.wallet);
     }
 
     const bobKey = await erc20Adapter.getMemoKey(bob.address);
@@ -94,49 +96,34 @@ describe("E2E: mUSDC full lifecycle via SDK public API", () => {
       await inboxClient.drainAll(bob.wallet);
     }
 
-    console.log(`[E2E:mUSDC] Alice: ${alice.address}`);
-    console.log(`[E2E:mUSDC] Bob:   ${bob.address} (${bob.fundTxHash})`);
+    // Mint mUSDC to fresh sender using deployer (wallet.sendTransaction, no ethers.Contract)
+    const mintCalldata = mintIface.encodeFunctionData("mint", [
+      sender.address,
+      AMOUNTS.HUNDRED_MUSDC,
+    ]);
+    const mintTx = await alice.sendTransaction({ to: ADDRESSES.mockUSDC, data: mintCalldata });
+    await mintTx.wait(1);
+    console.log(`[E2E:mUSDC] mint tx: ${mintTx.hash}`);
+
+    console.log(`[E2E:mUSDC] Sender (fresh): ${sender.address} (${sender.fundTxHash})`);
+    console.log(`[E2E:mUSDC] Bob (fresh):    ${bob.address} (${bob.fundTxHash})`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Step 1 — Mint 100 mUSDC to Alice using Interface (not ethers.Contract)
-  // ---------------------------------------------------------------------------
-
-  it("should mint 100 mUSDC to Alice via wallet.sendTransaction", async () => {
-    if (SKIP) return;
-
-    // Encode mint() call using ethers.Interface without instantiating ethers.Contract
-    const calldata = mintIface.encodeFunctionData("mint", [
-      alice.address,
-      AMOUNTS.HUNDRED_MUSDC,
-    ]);
-    const tx = await alice.sendTransaction({
-      to:   ADDRESSES.mockUSDC,
-      data: calldata,
-    });
-    await tx.wait(1);
-    console.log(`[E2E:mUSDC] mint tx: ${tx.hash}`);
-
-    const balance = await erc20Adapter.getBalance(alice.address);
-    expect(balance).toBeGreaterThanOrEqual(GROSS_WRAP);
-    console.log(`[E2E:mUSDC] Alice mUSDC balance after mint: ${balance}`);
-  }, 60_000);
-
-  // ---------------------------------------------------------------------------
-  // Step 2 — Approve JanusERC20 proxy via adapter.approveUnderlying() SDK method
+  // Step 1 — Approve JanusERC20 proxy via adapter.approveUnderlying() SDK method
   // ---------------------------------------------------------------------------
 
   it("should approve JanusERC20 proxy via adapter.approveUnderlying()", async () => {
     if (SKIP) return;
 
     // JanusERC20Adapter.approveUnderlying is a public SDK adapter method
-    const { txHash } = await (erc20Adapter as any).approveUnderlying(GROSS_WRAP, alice);
+    const { txHash } = await (erc20Adapter as any).approveUnderlying(GROSS_WRAP, sender.wallet);
     expect(txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
     console.log(`[E2E:mUSDC] approve tx: ${txHash}`);
   }, 60_000);
 
   // ---------------------------------------------------------------------------
-  // Step 3 — Wrap 10 mUSDC via adapter.wrap() + parse event for blinding
+  // Step 2 — Wrap 10 mUSDC via adapter.wrap() + parse event for blinding
   // ---------------------------------------------------------------------------
 
   it("should wrap 10 mUSDC and recover blinding from WrapWithSnapshot event", async () => {
@@ -144,7 +131,7 @@ describe("E2E: mUSDC full lifecycle via SDK public API", () => {
 
     const wrapResult = await erc20Adapter.wrap(
       { grossAmount: GROSS_WRAP },
-      alice,
+      sender.wallet,
     );
 
     expect(wrapResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
@@ -168,12 +155,12 @@ describe("E2E: mUSDC full lifecycle via SDK public API", () => {
           const snap = await erc20Adapter.decryptSnapshot(
             encBytes,
             { x: ephX, y: ephY },
-            aliceJub.privkey,
+            senderJub.privkey,
           );
 
           expect(snap.balance).toBeGreaterThan(0n);
-          aliceBalance  = snap.balance;
-          aliceBlinding = snap.blinding;
+          senderBalance  = snap.balance;
+          senderBlinding = snap.blinding;
           recovered = true;
           console.log(`[E2E:mUSDC] recovered balance: ${snap.balance} (${snap.balance / AMOUNTS.ONE_MUSDC} mUSDC)`);
           break;
@@ -184,11 +171,11 @@ describe("E2E: mUSDC full lifecycle via SDK public API", () => {
     }
 
     expect(recovered).toBe(true);
-    expect(aliceBalance).toBe(wrapResult.netAmount);
+    expect(senderBalance).toBe(wrapResult.netAmount);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Step 4 — shieldedTransfer 3 mUSDC to Bob via SDK adapter
+  // Step 3 — shieldedTransfer 3 mUSDC to Bob via SDK adapter
   // ---------------------------------------------------------------------------
 
   it("should shieldedTransfer 3 mUSDC to Bob via SDK adapter", async () => {
@@ -201,28 +188,28 @@ describe("E2E: mUSDC full lifecycle via SDK public API", () => {
         recipient:       bob.address,
         amount:          TRANSFER_AMOUNT,
         memo:            MEMO_TEXT,
-        currentBalance:  aliceBalance,
-        currentBlinding: aliceBlinding,
+        currentBalance:  senderBalance,
+        currentBlinding: senderBlinding,
       },
-      alice,
+      sender.wallet,
     );
 
     expect(sendResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
     expect(sendResult.newBalance).toBeDefined();
     expect(sendResult.newBlinding).toBeDefined();
 
-    aliceBalance  = sendResult.newBalance!;
-    aliceBlinding = sendResult.newBlinding!;
+    senderBalance  = sendResult.newBalance!;
+    senderBlinding = sendResult.newBlinding!;
 
     const bobCountAfter = await inboxClient.count(bob.address);
     expect(bobCountAfter).toBe(bobCountBefore + 1n);
 
     console.log(`[E2E:mUSDC] transfer tx: ${sendResult.txHash}`);
-    console.log(`[E2E:mUSDC] Alice remaining: ${aliceBalance}, Bob inbox: ${bobCountAfter}`);
+    console.log(`[E2E:mUSDC] Sender remaining: ${senderBalance}, Bob inbox: ${bobCountAfter}`);
   }, 120_000);
 
   // ---------------------------------------------------------------------------
-  // Step 5 — Bob drains inbox and decodes mUSDC note
+  // Step 4 — Bob drains inbox and decodes mUSDC note
   // ---------------------------------------------------------------------------
 
   it("should drain Bob inbox and decode correct mUSDC amount + memo", async () => {
@@ -252,28 +239,28 @@ describe("E2E: mUSDC full lifecycle via SDK public API", () => {
   }, 90_000);
 
   // ---------------------------------------------------------------------------
-  // Step 6 — Alice unwraps remaining mUSDC
+  // Step 5 — Sender unwraps remaining mUSDC
   // ---------------------------------------------------------------------------
 
   it("should unwrap remaining mUSDC via SDK adapter.unwrap()", async () => {
     if (SKIP) return;
 
-    const balanceBefore = await erc20Adapter.getBalance(alice.address);
+    const balanceBefore = await erc20Adapter.getBalance(sender.address);
 
     const unwrapResult = await erc20Adapter.unwrap(
       {
-        claimedAmount:   aliceBalance,
-        recipient:       alice.address,
-        currentBalance:  aliceBalance,
-        currentBlinding: aliceBlinding,
+        claimedAmount:   senderBalance,
+        recipient:       sender.address,
+        currentBalance:  senderBalance,
+        currentBlinding: senderBlinding,
       },
-      alice,
+      sender.wallet,
     );
 
     expect(unwrapResult.txHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
     expect(unwrapResult.netToRecipient).toBeGreaterThan(0n);
 
-    const balanceAfter = await erc20Adapter.getBalance(alice.address);
+    const balanceAfter = await erc20Adapter.getBalance(sender.address);
     expect(balanceAfter).toBeGreaterThan(balanceBefore);
 
     console.log(

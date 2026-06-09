@@ -128,7 +128,10 @@ export async function deriveMemoKeypair(
 export const ONE_FLOW      = 1n * 10n ** 18n;   // 1 FLOW in attoFLOW
 export const HALF_FLOW     = 5n * 10n ** 17n;   // 0.5 FLOW
 export const POINT1_FLOW   = 1n * 10n ** 17n;   // 0.1 FLOW
+export const TINY_FLOW     = 2n * 10n ** 16n;   // 0.02 FLOW (integration test default)
+export const MICRO_FLOW    = 5n * 10n ** 15n;   // 0.005 FLOW
 export const ONE_MUSDC     = 1_000_000n;         // 1 mUSDC (6 decimals)
+export const TEN_MUSDC     = 10_000_000n;        // 10 mUSDC
 export const HUNDRED_MUSDC = 100_000_000n;       // 100 mUSDC
 
 // ---------------------------------------------------------------------------
