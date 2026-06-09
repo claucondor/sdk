@@ -1,4 +1,4 @@
-# Extending @openjanus/sdk
+# Extending @claucondor/sdk
 
 This guide explains how to add new modules to the SDK without modifying
 any existing module. The architecture is designed so that adding a module
@@ -107,13 +107,13 @@ export * as mixer from "./modules/mixer";
 
 This makes the mixer available as:
 ```typescript
-import { mixer } from "@openjanus/sdk";
+import { mixer } from "@claucondor/sdk";
 const hekate = new mixer.HekateMixer({ network: "testnet" });
 ```
 
 Or as a direct import:
 ```typescript
-import { HekateMixer } from "@openjanus/sdk/modules/mixer";
+import { HekateMixer } from "@claucondor/sdk/modules/mixer";
 ```
 
 ### 6. Register in tsup.config.ts

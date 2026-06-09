@@ -223,7 +223,7 @@ remain active. `unpause()` restores normal operation.
 ### SDK integration
 
 ```typescript
-import { JanusFlow, JANUS_FLOW_CADENCE_ADDRESS } from "@openjanus/sdk/tokens";
+import { JanusFlow, JANUS_FLOW_CADENCE_ADDRESS } from "@claucondor/sdk/tokens";
 
 const sdk = new JanusFlow({ network: "testnet" });
 await sdk.configure();

@@ -1,12 +1,10 @@
 # @claucondor/sdk
 
-Multi-token privacy SDK for Flow. Version: **v0.7.4**.
+Multi-token privacy SDK for Flow. Version: **v0.7.5**.
 
-Send FLOW, WFLOW, MockUSDC, or MockFT (via JanusFT generic Cadence wrapper) shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
+Send FLOW, MockUSDC, or MockFT (via JanusFT generic Cadence wrapper) shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
 
-**v0.7.4**: Nonces for `orchestrateWrap` are now generated as cryptographically random 256-bit values via `@noble/hashes`. No localStorage state needed — works across devices and sessions with negligible (1/2^256) collision probability. If you need deterministic behaviour (tests, replay), pass `nonce` explicitly in `WrapOrchestrateInput`.
-
-**v0.6.4**: `JanusFT` generic Cadence wrapper — production-grade, underlying-agnostic. Real cross-VM BabyJub + Groth16 ZK (no stubs). MockFT is the testnet underlying.
+**v0.7.5**: Decrypt API consistency (`decryptAnyNote` util + `adapter.decryptIncomingNote`); `getLatestSnapshot` rewritten as reverse-scan + early-exit (~8.6× faster); `getLatestSnapshotWithBlock` exposed; `scanSnapshots` rate-limit fix (1 getLogs/chunk instead of 3). See CHANGELOG for details.
 
 ## Install
 
@@ -63,14 +61,27 @@ await flow.unwrap({
 
 ## Token IDs
 
-| ID | Variant | Contract |
-|----|---------|----------|
-| `flow` | native | `0x2458ae2d26797c2ffa3B4f6612Bdc4aDf22b7156` |
-| `wflow` | erc20 | `0x00129E94d5340bd19d0b4ed9CDf718BB6e0A9400` |
-| `mockusdc` | erc20 | `0xd45FDa099Cf67eD842eA379865AB08E18D62BAf3` |
-| `mockft` | cadence-ft | `0x7599043aea001283` (JanusFT) |
+Testnet (Flow EVM chainId 545 + Flow Cadence testnet). Single source of truth: `src/network/contracts.ts`.
 
-All at feeBps=10 (0.1%).
+| ID | Variant | Decimals | Proxy / Cadence | Underlying |
+|----|---------|----------|------------------|------------|
+| `flow` | native EVM | 18 | `0x9A83732417947Ef9b7AEa64bF807a345267c2FdA` | native FLOW |
+| `mockusdc` | EVM ERC20 | 6 | `0xD5E6a52635599E6B2296B5BfEeC617E333561ea0` | `0x686E8d90A7B608540cAF46E527fD8a5631A1b658` (MockUSDC) |
+| `mockft` | Cadence FT | 8 | `0xc4e8f99915893a2f` (JanusFT) | `0x7599043aea001283` (MockFT) |
+
+All at `feeBps=10` (0.1%).
+
+### Shared infra
+
+| Component | Address |
+|---|---|
+| `MemoKeyRegistry` (EVM) | `0x05D104962ff087441f26BA11A1E1C3b9E091D663` |
+| `babyJub` library | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` |
+| `ConfidentialTransferAggregateVerifier` | `0x5702A545d2853b03B808aEA331f892c121b67243` |
+| `AmountDiscloseAggregateVerifier` | `0xa80283baB7fcEFC2c75De43DB5a1cBF00E96B984` |
+| `PrivateTip` (Cadence) | `0xb9ac529c14a4c5a1` |
+| Admin (Cadence) | `0xc4e8f99915893a2f` |
+| Admin COA (EVM) | `0x000000000000000000000002656f9205e386ed78` |
 
 ## ERC20 tokens: pre-approve before wrap
 

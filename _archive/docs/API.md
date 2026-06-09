@@ -1,27 +1,27 @@
-# @openjanus/sdk — Public API Reference
+# @claucondor/sdk — Public API Reference
 
 ## Import patterns
 
 ```typescript
 // Token operations (most apps only need this)
-import { JanusToken, JanusFlow } from "@openjanus/sdk";
+import { JanusToken, JanusFlow } from "@claucondor/sdk";
 
 // Crypto operations (advanced users)
-import { buildTransferProof, computeCommitment, generateBlinding } from "@openjanus/sdk";
+import { buildTransferProof, computeCommitment, generateBlinding } from "@claucondor/sdk";
 
 // Network helpers
-import { createEvmWallet, NETWORK_CONFIG } from "@openjanus/sdk";
+import { createEvmWallet, NETWORK_CONFIG } from "@claucondor/sdk";
 
 // Primitive modules (power users, extension authors)
-import { primitives, utils } from "@openjanus/sdk";
+import { primitives, utils } from "@claucondor/sdk";
 
 // Types only
-import type { CommitmentXY, ProofUint256, FlowNetwork } from "@openjanus/sdk";
+import type { CommitmentXY, ProofUint256, FlowNetwork } from "@claucondor/sdk";
 
 // Direct module imports (tree-shakeable)
-import { JanusToken } from "@openjanus/sdk/tokens";
-import { computeCommitment } from "@openjanus/sdk/crypto";
-import { isOnCurveLocal } from "@openjanus/sdk/primitives";
+import { JanusToken } from "@claucondor/sdk/tokens";
+import { computeCommitment } from "@claucondor/sdk/crypto";
+import { isOnCurveLocal } from "@claucondor/sdk/primitives";
 ```
 
 ---

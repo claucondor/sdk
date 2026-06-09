@@ -2,6 +2,29 @@
 
 ---
 
+## 0.7.5 — 2026-06-08
+
+**Decrypt API consistency (OF-7), reverse-scan recovery, and rate-limit fix.**
+
+### Crypto
+
+- New `decryptAnyNote(ciphertext, ephPubkey, memoPrivKey)` util — format-agnostic decryption that tries v3 (EVM) first, falls back to shielded (Cadence-FT). Returns `null` if both fail. Use when the token type is unknown at call-site (e.g. mixed-token scanning).
+- Every adapter now exposes `decryptIncomingNote(ciphertext, ephPubkey, memoPrivKey)` that calls the correct decoder for its variant — no fallback overhead. `JanusFlowAdapter`/`JanusERC20Adapter` → v3 wire. `JanusFTAdapter` → shielded wire.
+- Fixes silent zero-balance recovery bug where mixing decoders returned `null` instead of the real amount (OF-7 — `/api/note/decrypt`-style fallback patterns).
+
+### Scan
+
+- `getLatestSnapshot` rewritten as **reverse-scan + early-exit** (chunk newest blocks first; return on first successful decrypt). 8.6× faster typical, ~5s worst-case vs ~45s forward-scan.
+- `getLatestSnapshotWithBlock(...)` exposed — returns `{snapshot, blockNumber}` for chained `scanIncomingNotes` calls.
+- `scanSnapshots` no longer makes 3 parallel `getLogs` per chunk — uses a single `getLogs(topics: [null, userTopic])` per chunk. Prevents `>40 req/s` bursts against QuickNode on large historical ranges.
+
+### Tests
+
+- 8 new round-trip tests for `decryptAnyNote` + adapter `decryptIncomingNote` (cross-decoder negative cases included).
+- Test suite: 173/173 pass.
+
+---
+
 ## 0.6.6 — 2026-06-03
 
 **JanusFTAdapter.getBalance: use contract canonical BalancePublicPath instead of hardcoded path.**
@@ -210,10 +233,9 @@ function shieldedTransfer(
   primitives back both `JanusFlow` and `JanusERC20`.
 - Same `circuits/v0.3/` zkey + wasm artifacts.
 
-### Migration
+### Backwards compatibility
 
-See `MIGRATION-v0.4.md`. No breaking changes — existing JanusFlow imports
-keep working identically.
+No breaking changes — existing JanusFlow imports keep working identically.
 
 ---
 
