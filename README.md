@@ -1,10 +1,10 @@
 # @claucondor/sdk
 
-Multi-token privacy SDK for Flow. Version: **v0.7.5**.
+Multi-token privacy SDK for Flow. Version: **v0.8.0-alpha.1**.
 
 Send FLOW, MockUSDC, or MockFT (via JanusFT generic Cadence wrapper) shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
 
-**v0.7.5**: Decrypt API consistency (`decryptAnyNote` util + `adapter.decryptIncomingNote`); `getLatestSnapshot` rewritten as reverse-scan + early-exit (~8.6× faster); `getLatestSnapshotWithBlock` exposed; `scanSnapshots` rate-limit fix (1 getLogs/chunk instead of 3). See CHANGELOG for details.
+**v0.8.0-alpha.1**: Protocol overhaul. `shieldedTransfer` is now 6-arg (sender snapshot removed from calldata). `scan/` replaced by `ShieldedInboxClient` (inbox drain) + `ShieldedCheckpointClient` (state recovery). New `cadence/` module with atomic transfer+checkpoint templates. See CHANGELOG for full details.
 
 ## Install
 
@@ -15,10 +15,10 @@ npm install @claucondor/sdk
 ## Quick start: the `sdk.token(id)` API
 
 ```typescript
-import { sdk, deriveMemoKeyFromSignature } from '@claucondor/sdk';
+import { sdk, deriveMemoKeyFromSignature, ShieldedInboxClient, ShieldedCheckpointClient } from '@claucondor/sdk';
 import { ethers } from 'ethers';
 
-// 1. Create a wallet (e.g. from private key)
+// 1. Create a wallet
 const wallet = new ethers.Wallet(process.env.PRIVKEY!, provider);
 
 // 2. Derive your persistent MemoKey (one signature → deterministic keypair)
@@ -33,67 +33,116 @@ await flow.publishMemoKey(memoKeypair, wallet);
 const wrapResult = await flow.wrap({ grossAmount: 5n * 10n**18n }, wallet);
 console.log('Wrapped, net:', wrapResult.netAmount); // 4.995 FLOW (0.1% fee)
 
-// 5. Send a shielded tip to Bob (NO cleartext amount on chain)
-const snapshot = await flow.latestSnapshot(wallet.address, memoKeypair.privkey);
-await flow.shieldedTransfer({
+// 5. Recover balance from checkpoint (or use last known state)
+const checkpoint = new ShieldedCheckpointClient();
+const snapshot = await checkpoint.readAndDecrypt(wallet, memoKeypair.privkey);
+// snapshot.balance, snapshot.blinding
+
+// 6. Send a shielded transfer to Bob
+const { txHash, checkpointPayload, newBalance, newBlinding } = await flow.shieldedTransfer({
   recipient: BOB_EVM_ADDR,
   amount: 2n * 10n**18n,
   memo: 'great work!',
-  currentBalance: snapshot.balance,
-  currentBlinding: snapshot.blinding,
+  currentBalance: snapshot!.balance,
+  currentBlinding: snapshot!.blinding,
 }, wallet);
 
-// 6. Bob scans for incoming tips and unwraps
-const deposits = await flow.scanDeposits(BOB_EVM_ADDR);
-const note = await flow.decryptNoteTo(
-  deposits[0].ciphertext,
-  deposits[0].ephPubkey,
-  bobMemoKeypair.privkey
-);
-console.log('Received:', note.amount, 'memo:', note.memo);
-await flow.unwrap({
-  claimedAmount: note.amount,
-  recipient: BOB_EVM_ADDR,
-  currentBalance: note.amount,
-  currentBlinding: note.blinding,
-}, bobWallet);
+// 7. Update your sender checkpoint (persist new balance on-chain)
+await checkpoint.update(checkpointPayload!, 0n, wallet);
+
+// 8. Bob drains his inbox and decrypts incoming notes
+const inbox = new ShieldedInboxClient();
+const { decrypted } = await inbox.drainAndDecrypt(bobWallet, bobMemoKeypair.privkey);
+for (const { content } of decrypted) {
+  console.log('Received:', content.amount, 'memo:', content.memo);
+}
 ```
 
 ## Token IDs
 
 Testnet (Flow EVM chainId 545 + Flow Cadence testnet). Single source of truth: `src/network/contracts.ts`.
 
-| ID | Variant | Decimals | Proxy / Cadence | Underlying |
-|----|---------|----------|------------------|------------|
-| `flow` | native EVM | 18 | `0x9A83732417947Ef9b7AEa64bF807a345267c2FdA` | native FLOW |
-| `mockusdc` | EVM ERC20 | 6 | `0xD5E6a52635599E6B2296B5BfEeC617E333561ea0` | `0x686E8d90A7B608540cAF46E527fD8a5631A1b658` (MockUSDC) |
-| `mockft` | Cadence FT | 8 | `0xc4e8f99915893a2f` (JanusFT) | `0x7599043aea001283` (MockFT) |
+| ID | Variant | Decimals | Proxy / Cadence deployer |
+|----|---------|----------|--------------------------|
+| `flow` | native EVM | 18 | `0xA64340C1d356835A2450306Ffd290Ed52c001Ad3` |
+| `mockusdc` | EVM ERC20 | 6 | `0xFD8F82bE1782AF1F85f4673065e94fb3F8D5387d` |
+| `mockft` | Cadence FT | 8 | `0x4b6bc58bc8bf5dcc` (JanusFT) |
 
 All at `feeBps=10` (0.1%).
 
-### Shared infra
+### Shared infra (v0.8 testnet)
 
 | Component | Address |
 |---|---|
-| `MemoKeyRegistry` (EVM) | `0x05D104962ff087441f26BA11A1E1C3b9E091D663` |
-| `babyJub` library | `0x27139AFda7425f51F68D32e0A38b7D43BcB0f870` |
-| `ConfidentialTransferAggregateVerifier` | `0x5702A545d2853b03B808aEA331f892c121b67243` |
-| `AmountDiscloseAggregateVerifier` | `0xa80283baB7fcEFC2c75De43DB5a1cBF00E96B984` |
-| `PrivateTip` (Cadence) | `0xb9ac529c14a4c5a1` |
-| Admin (Cadence) | `0xc4e8f99915893a2f` |
-| Admin COA (EVM) | `0x000000000000000000000002656f9205e386ed78` |
+| `ShieldedInbox` (EVM) | `0x0C787AAcbA9a116EdA4ec05Be41D8474D470bfC6` |
+| `ShieldedCheckpoint` (EVM) | `0xbF8dbE133FC1319570dBe43E32BFD9a6D64E1E76` |
+| `MemoKeyRegistry` (EVM) | `0x361bD4d037838A3a9c5408AE465d36077800ee6c` |
+| `ConfidentialTransferVerifier` | `0x38e69fE7Ba7c2C586d64DFFc14742641A675666c` |
+| `AmountDiscloseVerifier` | `0xf7B634D41259D0613345633eE1CD193A030A6329` |
+| Cadence deployer | `0x4b6bc58bc8bf5dcc` |
+| Cadence deployer COA (EVM) | `0x0000000000000000000000020885d7ad3582356a` |
+
+## v0.8 protocol architecture
+
+```
+shieldedTransfer (6-arg)
+  ├── token.deposit(recipient, ciphertext, ephX, ephY)  ← called internally by token contract
+  └── (returns checkpointPayload)
+
+checkpointPayload → ShieldedCheckpoint.update()  ← caller submits separately
+                                                   OR use combinedShieldedTransferWithCheckpoint.cdc
+```
+
+**State recovery (v0.8):**
+
+```typescript
+// No more event scanning. One read per session:
+const cp = await checkpointClient.readAndDecrypt(wallet, memoPrivKey);
+// cp.balance = verified sender balance
+// cp.blinding = Pedersen blinding factor
+
+// Then drain any pending inbox notes (incoming transfers since last checkpoint):
+const { decrypted } = await inboxClient.drainAndDecrypt(wallet, memoPrivKey);
+const incomingTotal = decrypted.reduce((s, { content }) => s + content.amount, 0n);
+const trueBalance = cp.balance + incomingTotal;
+```
 
 ## ERC20 tokens: pre-approve before wrap
 
 ```typescript
 const usdc = sdk.token('mockusdc');
-
 // Pre-approve underlying for grossAmount
 const underlying = new ethers.Contract(MOCK_USDC_ADDR, ERC20_ABI, wallet);
 await underlying.approve(usdc.address, 100n * 10n**6n);
-
-// Then wrap
 await usdc.wrap({ grossAmount: 100n * 10n**6n }, wallet);
+```
+
+## Cadence-native operations (JanusFT / Flow wallet users)
+
+```typescript
+import { cadenceTx } from '@claucondor/sdk/cadence';
+import * as fcl from '@onflow/fcl';
+
+// First-time setup (idempotent):
+await fcl.mutate({ cadence: cadenceTx.installInboxAndCheckpoint(), args: () => [] });
+
+// Atomic shieldedTransfer + checkpoint update in ONE Cadence tx:
+const JANUS_FLOW_PROXY = "0xA64340C1d356835A2450306Ffd290Ed52c001Ad3";
+await fcl.mutate({
+  cadence: cadenceTx.combinedShieldedTransferWithCheckpoint(JANUS_FLOW_PROXY),
+  args: (arg, t) => [
+    arg(recipientEVMAddress, t.Address),
+    arg(publicInputs.map(String), t.Array(t.UInt256)),
+    arg(proof.map(String), t.Array(t.UInt256)),
+    arg(Array.from(encryptedNoteTo).map(String), t.Array(t.UInt8)),
+    arg(ephPubkeyToX.toString(), t.UInt256),
+    arg(ephPubkeyToY.toString(), t.UInt256),
+    arg(Array.from(encryptedSnapshot).map(String), t.Array(t.UInt8)),
+    arg(ephPubkeyX.toString(), t.UInt256),
+    arg(ephPubkeyY.toString(), t.UInt256),
+    arg(String(lastConsumedNoteIndex), t.UInt64),
+  ],
+});
 ```
 
 ## Reading state without signing
@@ -104,6 +153,15 @@ const commitment = await sdk.token('flow').getCommitment(ALICE_EVM_ADDR);
 const memoKey = await sdk.token('flow').getMemoKey(ALICE_EVM_ADDR);
 const bps = await sdk.token('flow').feeBps(); // 10 = 0.1%
 const net = await sdk.token('flow').computeNet(5n * 10n**18n);
+
+// Checkpoint metadata (public — no signer):
+const cp = new ShieldedCheckpointClient();
+const meta = await cp.metadata(ALICE_EVM_ADDR);
+// { version, lastConsumedNoteIndex, lastUpdatedBlock, hasCheckpoint }
+
+// Inbox pending count (public — no signer):
+const inbox = new ShieldedInboxClient();
+const pending = await inbox.count(ALICE_EVM_ADDR);
 ```
 
 ## MemoKey: the persistence contract
@@ -111,42 +169,31 @@ const net = await sdk.token('flow').computeNet(5n * 10n**18n);
 The MemoKey is a BabyJub keypair derived deterministically from a wallet signature. Publish the pubkey once; keep the privkey in memory only.
 
 ```typescript
-import { deriveMemoKeyFromSignature, MEMO_KEY_CONTEXT } from '@claucondor/sdk';
+import { deriveMemoKeyFromSignature } from '@claucondor/sdk';
 
 // On any device with the same wallet, you get the same keypair:
 const sig = await wallet.signMessage('OpenJanus MemoKey v1');
 const keypair = await deriveMemoKeyFromSignature(ethers.getBytes(sig));
-// keypair.pubkey  → publish on-chain
-// keypair.privkey → decrypt snapshots + notes (never persisted)
-```
-
-## Snapshot recovery
-
-If you lose local state, reconstruct from on-chain events:
-
-```typescript
-const snapshot = await sdk.token('flow').latestSnapshot(MY_EVM_ADDR, memoPrivKey);
-console.log('Recovered balance:', snapshot.balance);
-console.log('Recovered blinding:', snapshot.blinding);
-// timestampMs is ALWAYS in milliseconds
-console.log('As of:', new Date(snapshot.timestampMs).toISOString());
+// keypair.pubkey  → publish on-chain once
+// keypair.privkey → decrypt checkpoints + inbox notes (never persisted)
 ```
 
 ## Advanced: orchestration layer (for custom adapters)
 
-The SDK exposes its internal proof-building pipeline for power users:
-
 ```typescript
-import { orchestrateWrap, orchestrateShieldedTransfer, orchestrateUnwrap } from '@claucondor/sdk';
+import { orchestrateShieldedTransfer } from '@claucondor/sdk';
 
-// orchestrateWrap returns: { netAmount, fee, txCommit, amountProof, encryptedSnapshot, ... }
-// orchestrateShieldedTransfer returns: { publicInputs, proof, encryptedSnapshot, encryptedNoteTo, ... }
-// orchestrateUnwrap returns: { txCommit, amountProof, transferPublicInputs, transferProof, ... }
+// Returns txParams (for shieldedTransfer calldata) + checkpointPayload (for ShieldedCheckpoint.update)
+const orch = await orchestrateShieldedTransfer({
+  currentBalance, currentBlinding, transferAmount,
+  senderMemoKeypair, recipientMemoKey, memo,
+});
+// orch.txParams.publicInputs  — 6 inputs for the transfer proof
+// orch.txParams.proof         — 8-element Groth16 proof
+// orch.txParams.encryptedNoteTo — ECIES ciphertext for recipient
+// orch.checkpointPayload       — pass to ShieldedCheckpoint.update()
+// orch.newBalance, orch.newBlinding — local state update
 ```
-
-## Architecture
-
-See `docs/ARCHITECTURE.md` for the full 4-layer model.
 
 ## Privacy properties
 
@@ -155,6 +202,7 @@ See `docs/ARCHITECTURE.md` for the full 4-layer model.
 - **Commitment opacity**: 128-bit Pedersen blinding — brute-force infeasible
 - **Forward secrecy**: fresh ephemeral per shieldedTransfer — two sends to same recipient are unlinkable
 - **Note encryption**: BabyJub ECIES + AES-256-GCM
+- **Checkpoint privacy**: read() scoped to msg.sender — blob not exposed to public callers
 
 ## License
 

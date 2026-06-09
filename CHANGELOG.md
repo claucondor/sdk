@@ -2,6 +2,48 @@
 
 ---
 
+## 0.8.0-alpha.1 — 2026-06-09
+
+**v0.8 protocol rewrite: inbox/checkpoint replace scan, 6-arg shieldedTransfer, schema-agnostic ECIES.**
+
+### Breaking Changes
+
+- **`shieldedTransfer` ABI**: 9 args → 6 args. `encryptedSnapshotFrom`, `ephPubFromX`, `ephPubFromY` removed from calldata. The sender's checkpoint payload is returned by the SDK and must be submitted separately via `ShieldedCheckpoint.update()`.
+- **`scan/` module removed**. Use `ShieldedInboxClient.drainAndDecrypt()` for incoming note discovery. Use `ShieldedCheckpointClient.readAndDecrypt()` for balance recovery.
+- **`SnapshotContent`**: `timestampMs` field removed. Shape is now `{balance: bigint, blinding: bigint}` only.
+- **`NoteContent`**: `tipId` field removed (was app-specific, not protocol). Apps must carry it externally.
+- **`SendResult`**: now returns `checkpointPayload`, `newBalance`, `newBlinding`.
+
+### New Modules
+
+- **`src/inbox/ShieldedInboxClient`**: EVM client for `ShieldedInbox.sol`. Methods: `count`, `peek`, `peekAll`, `drainAll`, `drainBatch`, `drainAndDecrypt`, `deposit`.
+- **`src/checkpoint/ShieldedCheckpointClient`**: EVM client for `ShieldedCheckpoint.sol`. Methods: `exists`, `metadata`, `read`, `readAndDecrypt`, `update`, `encryptAndUpdate`.
+- **`src/cadence/transactions`**: Cadence transaction templates — `installInbox`, `installCheckpoint`, `installInboxAndCheckpoint`, `updateCheckpointViaCoa`, `combinedShieldedTransferWithCheckpoint`.
+
+### Crypto
+
+- **`src/crypto/note-helpers.ts`** (new): Protocol-canonical note encryption. Wire format: `{v:1, amt, bld, memo?}`.
+- **`src/crypto/checkpoint-schema.ts`** (new): Protocol-canonical snapshot encryption. Wire format: `{v:1, bal, bld}`.
+- `src/crypto/note-schema.ts` and `snapshot-schema.ts` now re-export from the new canonical files (backward-compat shims).
+- `decryptAnyNote`: dropped legacy `{v,a,b,d}` shielded fallback (JanusFT v0.8 now uses canonical format).
+- Added `decryptInboxNote(note: InboxNote, privkey: bigint)` convenience function.
+
+### Network
+
+- All Janus Cadence contracts moved to `0x4b6bc58bc8bf5dcc` (was `0xc4e8f99915893a2f`).
+- `SHIELDED_INBOX_ADDRESS = "0x0C787AAcbA9a116EdA4ec05Be41D8474D470bfC6"` (new).
+- `SHIELDED_CHECKPOINT_ADDRESS = "0xbF8dbE133FC1319570dBe43E32BFD9a6D64E1E76"` (new).
+- `MEMO_REGISTRY_ADDRESS = "0x361bD4d037838A3a9c5408AE465d36077800ee6c"` (was `0x05D104...`).
+- `LEGACY_V071_JANUSFLOW_PROXY` preserved for PrivateTip demo reference.
+- v0.8 `VERIFIERS`: `transferVerifier = 0x38e69fE7…`, `amountDiscloseVerifier = 0xf7B634…`.
+
+### Tests
+
+- 72 unit tests across 8 test files (all passing).
+- Covers: fee-math, note-helpers, checkpoint-schema, decrypt-any-note, pi-b-swap, contract addresses, COA registry, Cadence templates.
+
+---
+
 ## 0.7.5 — 2026-06-08
 
 **Decrypt API consistency (OF-7), reverse-scan recovery, and rate-limit fix.**
