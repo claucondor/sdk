@@ -1,42 +1,39 @@
 /**
- * crypto/decrypt-any-note.ts — Format-agnostic note decryption.
+ * crypto/decrypt-any-note.ts — ECIES note decryption helpers.
  *
- * Two wire formats exist in the protocol:
- *   - "v3"      used by EVM adapters (JanusFlow, JanusERC20). Fields: {v,amt,bld,memo?,tip?}.
- *               Encrypt with encryptNote / decrypt with decryptNote.
- *   - "shielded" used by Cadence-FT adapters (JanusFT). Fields: {v,a,b,d?}.
- *               Encrypt with encryptShieldedNote / decrypt with decryptShieldedNote.
+ * v0.8: A single canonical wire format exists — {v:1, amt, bld, memo?} encoded
+ * in note-helpers.ts. The legacy {v,a,b,d} "shielded" format from JanusFT v0.6
+ * is dropped because JanusFT v0.8 now uses the same note-helpers format.
  *
- * If you know which token type produced the ciphertext, use the adapter's
- * decryptIncomingNote() method — it calls the correct decoder with no fallback overhead.
- * If the token type is unknown at call-site, use decryptAnyNote() — it tries v3 first,
- * falls back to shielded, returns null if both fail.
+ * decryptAnyNote() tries the canonical v1 format first. Apps with custom
+ * schemas should call decryptText() directly and parse their own payload.
+ *
+ * decryptInboxNote() handles a ShieldedInbox.Note struct (as returned by
+ * drainBatch / drainAll / peek) — wraps decryptAnyNote with convenient
+ * note-struct input shape.
  */
 
 import type { Point } from "../types/commitment";
-import { decryptNote } from "./note-schema";
-import { decryptShieldedNote } from "./shielded-note";
+import type { InboxNote, NoteContent } from "../types";
+import { decryptNote } from "./note-helpers";
 
 /**
- * Normalized result returned by decryptAnyNote and adapter.decryptIncomingNote.
+ * Normalized decryption result.
  *
- * Both formats expose amount + blinding. Optional fields:
- *   - memo   present on v3 notes that included a memo string.
- *   - data   present on shielded notes that included app-level data (same value
- *            as memo on the shielded path — callers can read either field).
- *   - tipId  present on v3 notes that included a tip identifier string.
- *   - wireFormat  diagnostic: tells you which decoder succeeded.
+ * wireFormat is always "v1" in v0.8.
+ * tipId is not part of the protocol note schema; apps that need it should
+ * extend NoteContent locally.
  */
 export interface DecryptedAnyNote {
   amount: bigint;
   blinding: bigint;
   memo?: string;
+  /** Alias for memo — present for backward compatibility with v0.7 callers. */
   data?: string;
-  tipId?: string;
-  wireFormat: "v3" | "shielded";
+  wireFormat: "v1";
 }
 
-/** Normalize ephPubkey input to a Point object. */
+/** Normalize ephPubkey to a Point object. */
 function toPoint(
   ephPubkey: { x: bigint; y: bigint } | [bigint, bigint]
 ): Point {
@@ -46,20 +43,15 @@ function toPoint(
   return ephPubkey;
 }
 
-/** Normalize ciphertext input to Uint8Array. */
+/** Normalize ciphertext to Uint8Array. */
 function toUint8Array(ciphertext: Uint8Array | number[]): Uint8Array {
   return ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext);
 }
 
 /**
- * Try to decrypt a note ciphertext without knowing its wire format.
- *
- * Attempts v3 (EVM) format first, then shielded (Cadence-FT) format.
- * Returns null if both decoders fail — caller can treat this as "not for me"
- * or as a corrupted blob.
- *
- * Use this when scanning mixed logs or when the token type is unknown.
- * When the token type is known, prefer adapter.decryptIncomingNote() instead.
+ * Decrypt a note ciphertext.
+ * Returns null if decryption fails (wrong key or corrupt ciphertext).
+ * Use adapter.decryptIncomingNote() if the token type is known — it is faster.
  */
 export async function decryptAnyNote(
   ciphertext: Uint8Array | number[],
@@ -69,34 +61,38 @@ export async function decryptAnyNote(
   const ct = toUint8Array(ciphertext);
   const pub = toPoint(ephPubkey);
 
-  // --- Try v3 format (EVM adapters: JanusFlow, JanusERC20) ---
   try {
-    const v3 = await decryptNote(ct, pub, memoPrivKey);
+    const note = await decryptNote(ct, pub, memoPrivKey);
     return {
-      amount: v3.amount,
-      blinding: v3.blinding,
-      memo: v3.memo,
-      data: v3.memo,
-      tipId: v3.tipId,
-      wireFormat: "v3",
+      amount: note.amount,
+      blinding: note.blinding,
+      memo: note.memo,
+      data: note.memo,
+      wireFormat: "v1",
     };
   } catch {
-    // v3 failed — try shielded format
+    return null;
   }
+}
 
-  // --- Try shielded format (Cadence-FT adapter: JanusFT) ---
+/**
+ * Decrypt a ShieldedInbox note using the recipient's memo private key.
+ *
+ * @param note      Note struct from ShieldedInbox.drainBatch / drainAll / peek.
+ * @param privkey   Recipient's BabyJub memo private key.
+ * @returns         Decrypted NoteContent, or null if decryption fails.
+ */
+export async function decryptInboxNote(
+  note: InboxNote,
+  privkey: bigint
+): Promise<NoteContent | null> {
   try {
-    const sh = await decryptShieldedNote(ct, pub, memoPrivKey);
-    return {
-      amount: sh.amount,
-      blinding: sh.blinding,
-      memo: sh.data,
-      data: sh.data,
-      wireFormat: "shielded",
-    };
+    return await decryptNote(
+      note.ciphertext,
+      { x: note.ephPubkeyX, y: note.ephPubkeyY },
+      privkey
+    );
   } catch {
-    // Both decoders failed
+    return null;
   }
-
-  return null;
 }

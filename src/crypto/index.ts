@@ -1,18 +1,12 @@
 /**
- * crypto/index.ts — Higher-level crypto operations (v0.3)
+ * crypto/index.ts — Higher-level crypto operations (v0.8)
  *
  * These are the operations most app-level code will use.
  * They compose primitives into complete workflows.
  *
- * v0.3 replaces the v0.2 ElGamal proof builders (buildEncryptProof /
- * buildDecryptProof / buildTransferProof) with two generic helpers that
- * directly target the v0.3 Pedersen-commit shape:
- *
- *   buildAmountDiscloseProof   — wrap / unwrap boundary proof
- *   buildShieldedTransferProof — fully shielded sender→recipient transfer
- *
- * The Pedersen commitment helpers and the FLOW unit + babyjub randomness
- * utilities are retained.
+ * v0.8 design: schema-agnostic ECIES primitives. The SDK provides a canonical
+ * note schema ({v:1, amt, bld, memo?}) but apps are free to encrypt arbitrary
+ * payloads using encryptText / decryptText directly.
  */
 
 // Commitment utilities (Pedersen on BabyJubJub)
@@ -27,7 +21,7 @@ export {
 } from "./commitment";
 export type { CommitmentXY } from "./commitment";
 
-// aggregate amount-disclose proof (wrap + unwrap boundary)
+// Aggregate amount-disclose proof (wrap + unwrap boundary)
 export { buildAmountDiscloseProof } from "./amount-disclose";
 export type {
   AmountDiscloseProofInput,
@@ -35,7 +29,7 @@ export type {
   ProofArtifactOptions,
 } from "./amount-disclose";
 
-// v0.3 shielded-transfer proof (HIDDEN amount)
+// Shielded-transfer proof (hidden amount)
 export { buildShieldedTransferProof } from "./shielded-transfer";
 export type {
   ShieldedTransferProofInput,
@@ -55,7 +49,7 @@ export {
   FLOW_SCALE,
 } from "./babyjub-utils";
 
-// v0.4.1 memo encryption primitives (generic ECIES on BabyJubJub + AES-GCM)
+// Memo encryption primitives (generic ECIES on BabyJubJub + AES-GCM)
 export {
   generateBabyJubKeypair,
   pubkeyFromPrivkey,
@@ -63,27 +57,24 @@ export {
 } from "./babyjub-keypair";
 export type { BabyJubKeypair } from "./babyjub-keypair";
 
+// Schema-agnostic ECIES primitives (encrypt/decrypt arbitrary bytes)
 export { encryptText } from "./encrypt-text";
 export type { MemoCiphertext } from "./encrypt-text";
-
 export { decryptText } from "./decrypt-text";
 
-// v0.4.5 — Deterministic BabyJub keypair derivation (sign-derive pattern).
-// Use with a wallet signature to recover the same MemoKey on any device.
+// Deterministic BabyJub keypair derivation (sign-derive pattern).
 export { deriveBabyJubKeypairFromBytes } from "./derive-keypair";
 
-// v0.4.4 — Shielded note (protocol-level payload that EVERY JanusFlow
-// shielded transfer should attach so recipients can decrypt + unwrap).
-export { encryptShieldedNote, decryptShieldedNote } from "./shielded-note";
-export type { ShieldedNote } from "./shielded-note";
+// Protocol-canonical note helpers ({v:1, amt, bld, memo?})
+export { encryptNote, decryptNote } from "./note-helpers";
 
-// Snapshot + Note schema (wrap/transfer/unwrap encrypted blobs)
-// These are the canonical encode/decode functions for on-chain blobs.
-export { encryptSnapshot, decryptSnapshot } from "./snapshot-schema";
-export { encryptNote, decryptNote } from "./note-schema";
-export type { SnapshotContent, NoteContent } from "../types";
+// Checkpoint schema (self-directed snapshot for ShieldedCheckpoint.update())
+export { encryptSnapshot, decryptSnapshot } from "./checkpoint-schema";
 
-// OF-7: format-agnostic decrypt (tries v3 then shielded; use when token type is unknown).
-// When the token type is known, use adapter.decryptIncomingNote() — no fallback overhead.
-export { decryptAnyNote } from "./decrypt-any-note";
+// Type-only exports
+export type { NoteContent, SnapshotContent } from "../types";
+
+// Format-agnostic decrypt — use when token type is unknown.
+// When token type is known, use decryptNote() directly.
+export { decryptAnyNote, decryptInboxNote } from "./decrypt-any-note";
 export type { DecryptedAnyNote } from "./decrypt-any-note";

@@ -124,10 +124,9 @@ export async function orchestrateUnwrapWithPrebuiltProofs(
   const fee = feeBps === 0 ? 0n : (claimedAmount * BigInt(feeBps)) / 10000n;
   const netToRecipient = claimedAmount - fee;
   const newBalance = currentBalance - claimedAmount;
-  const nowMs = Date.now();
 
   const snapshotEnc = await encryptSnapshot(
-    { balance: newBalance, blinding: newBlinding, timestampMs: nowMs },
+    { balance: newBalance, blinding: newBlinding },
     senderMemoKeypair.pubkey
   );
 
@@ -197,9 +196,8 @@ export async function orchestrateUnwrap(
   });
 
   // 6. Encrypt residual snapshot
-  const nowMs = Date.now();
   const snapshotEnc = await encryptSnapshot(
-    { balance: newBalance, blinding: newBlinding, timestampMs: nowMs },
+    { balance: newBalance, blinding: newBlinding },
     senderMemoKeypair.pubkey
   );
 

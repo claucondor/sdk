@@ -1,15 +1,17 @@
 /**
- * @claucondor/sdk — v0.6.0
+ * @claucondor/sdk — v0.8.0
  *
  * Multi-token SDK for OpenJanus confidential tokens on Flow.
  *
- * v0.6 architecture:
+ * v0.8 architecture:
  *   adapters/      — JanusTokenAdapter interface + 3 generic variant implementations
  *   orchestration/ — ALL crypto + ordering logic (wrap/shieldedTransfer/unwrap)
- *   crypto/        — ECIES, snapshot-schema, note-schema, memokey derivation, proof builders
+ *   crypto/        — ECIES, note-helpers, checkpoint-schema, memokey derivation, proof builders
  *   proof/         — Groth16 wrappers + pi_b swap
  *   network/       — EVM/Cadence clients + TOKEN_REGISTRY
- *   scan/          — Event scanner + latest-snapshot reconstruction
+ *   inbox/         — ShieldedInboxClient (state recovery — replaces scan/)
+ *   checkpoint/    — ShieldedCheckpointClient (sender-side encrypted state store)
+ *   cadence/       — Cadence transaction templates for inbox/checkpoint operations
  *
  * Entry point:
  *   import { sdk } from '@claucondor/sdk';
@@ -100,8 +102,10 @@ export type {
   UnwrapResult,
   TxResult,
   DepositRecord,
+  InboxNote,
   NoteContent,
   SnapshotContent,
+  CheckpointPayload,
 } from "./types";
 export { SNAPSHOT_TIMESTAMP_UNIT } from "./types";
 
@@ -110,8 +114,6 @@ export { deriveMemoKeyFromSignature, MEMO_KEY_CONTEXT } from "./crypto/memokey";
 export { deriveBabyJubKeypairFromBytes } from "./crypto/derive-keypair";
 export { encryptSnapshot, decryptSnapshot } from "./crypto/snapshot-schema";
 export { encryptNote, decryptNote } from "./crypto/note-schema";
-export { encryptShieldedNote, decryptShieldedNote } from "./crypto/shielded-note";
-export type { ShieldedNote } from "./crypto/shielded-note";
 export { decryptAnyNote } from "./crypto/decrypt-any-note";
 export type { DecryptedAnyNote } from "./crypto/decrypt-any-note";
 export { generateBlinding } from "./crypto/commitment";
@@ -141,10 +143,14 @@ export type { ShieldedTransferOrchestrateInput, ShieldedTransferOrchestrateResul
 export { orchestrateUnwrap } from "./orchestration/unwrap";
 export type { UnwrapOrchestrateInput, UnwrapOrchestrateResult } from "./orchestration/unwrap";
 
-// Scan helpers
-export { scanSnapshots, scanIncomingNotes } from "./scan/event-scanner";
-export { getLatestSnapshot, getLatestSnapshotWithBlock } from "./scan/latest-snapshot";
-export type { LatestSnapshotResult } from "./scan/latest-snapshot";
+// Inbox + Checkpoint clients (v0.8 — replace scan/)
+export { ShieldedInboxClient } from "./inbox/ShieldedInboxClient";
+export type { DrainResult, DrainAndDecryptResult } from "./inbox/ShieldedInboxClient";
+export { ShieldedCheckpointClient } from "./checkpoint/ShieldedCheckpointClient";
+export type { CheckpointMetadata, RawCheckpoint, UpdateResult } from "./checkpoint/ShieldedCheckpointClient";
+
+// Cadence transaction templates (v0.8)
+export { cadenceTx, installInbox, installCheckpoint, installInboxAndCheckpoint, updateCheckpointViaCoa, combinedShieldedTransferWithCheckpoint } from "./cadence/index";
 
 // Fee helpers (pure math, no provider)
 export {

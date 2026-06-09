@@ -1,30 +1,40 @@
 /**
  * orchestration/shielded-transfer.ts — Full shielded transfer orchestration.
  *
- * Sequence (TWO ephemerals — forward secrecy + recipient note):
- *   1. Read recipient's memokey from contract.
- *   2. Generate fresh blindings: transferBlinding, newBlinding.
- *   3. Build ConfidentialTransfer proof:
- *        private: oldBalance, oldBlinding, transferAmount, transferBlinding, newBlinding
- *        public:  [C_old, C_tx, C_new]
- *   4. Encrypt snapshot (sender's residual {newBalance, newBlinding}) to sender's memokey.
- *      Uses ephemeral A (ephPubkeyX/Y) — snapshot for sender's own recovery.
- *   5. Encrypt note {transferAmount, transferBlinding, memo} to RECIPIENT's memokey.
- *      Uses ephemeral B (ephPubkeyToX/Y) — note for recipient.
- *   6. Return all params.
+ * v0.8 design: sender snapshot is NO LONGER passed as calldata to shieldedTransfer.
+ * The new 6-arg signature is:
+ *   shieldedTransfer(to, publicInputs[6], proof[8], encryptedNoteTo, ephPubkeyToX, ephPubkeyToY)
  *
- * Forward secrecy: each call uses independent fresh ephemerals for both
- * the sender snapshot and the recipient note, so two txs to the same
- * recipient are unlinkable by ephemeral pubkey.
+ * The sender's checkpoint payload (encryptedSnapshot + ephKeys) is returned
+ * separately in `checkpointPayload` so callers can:
+ *   A. Call ShieldedCheckpoint.update() in a separate EVM tx (two txs)
+ *   B. Use combined_shielded_transfer_with_checkpoint.cdc for atomic Cadence execution
+ *   C. Skip checkpoint update entirely for read-only testing
+ *
+ * Sequence:
+ *   1. Generate fresh transferBlinding and newBlinding.
+ *   2. Build ConfidentialTransfer proof:
+ *        private: oldBalance, oldBlinding, transferAmount, transferBlinding, newBlinding
+ *        public:  [C_old.x, C_old.y, C_tx.x, C_tx.y, C_new.x, C_new.y]
+ *   3. Encrypt recipient note {amount, blinding, memo} to recipient's memokey.
+ *   4. Encrypt sender snapshot {balance, blinding} to sender's own memokey.
+ *   5. Return:
+ *        txParams       — 6 args for shieldedTransfer calldata
+ *        checkpointPayload — 3 args for ShieldedCheckpoint.update()
  */
 
 import { buildShieldedTransferProof } from "../crypto/shielded-transfer";
-import { encryptSnapshot } from "../crypto/snapshot-schema";
-import { encryptNote } from "../crypto/note-schema";
+import { encryptSnapshot } from "../crypto/checkpoint-schema";
+import { encryptNote } from "../crypto/note-helpers";
 import { generateBlinding } from "../crypto/commitment";
 import type { BabyJubKeypair } from "../crypto/babyjub-keypair";
 import type { Point } from "../types/commitment";
 import type { ProofUint256 } from "../types/proof";
+import type { CheckpointPayload } from "../types";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export interface ShieldedTransferOrchestrateInput {
   currentBalance: bigint;
@@ -33,127 +43,58 @@ export interface ShieldedTransferOrchestrateInput {
   senderMemoKeypair: BabyJubKeypair;
   recipientMemoKey: Point;
   memo?: string;
-  tipId?: string;
-  /** Recipient hint stored in sender's v3 snapshot (Cadence address or COA EVM hex). */
-  recipient?: string;
-}
-
-export interface ShieldedTransferOrchestrateResult {
-  publicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
-  proof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
-  // Sender snapshot (ephemeral A)
-  encryptedSnapshot: Uint8Array;
-  ephPubkeyX: bigint;
-  ephPubkeyY: bigint;
-  // Recipient note (ephemeral B)
-  encryptedNoteTo: Uint8Array;
-  ephPubkeyToX: bigint;
-  ephPubkeyToY: bigint;
-  // For local state update after tx
-  newBalance: bigint;
-  newBlinding: bigint;
-  transferBlinding: bigint;
 }
 
 /**
- * Input for orchestrateShieldedTransferWithPrebuiltProof.
- * Browser callers POST to /api/proof/shielded-transfer and pass the result here.
- * The blindings must be generated client-side BEFORE the API call so they can
- * be used for snapshot and note encryption here.
+ * v0.8 result shape: txParams (6 calldata args for shieldedTransfer) +
+ * checkpointPayload (3 args for ShieldedCheckpoint.update()).
+ *
+ * The result also exposes newBalance and newBlinding for local state
+ * tracking (the caller should update their in-memory state with these values
+ * regardless of whether they update the checkpoint).
  */
+export interface ShieldedTransferOrchestrateResult {
+  /** Six calldata arguments for the v0.8 shieldedTransfer(to, ...) ABI. */
+  txParams: {
+    publicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
+    proof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
+    encryptedNoteTo: Uint8Array;
+    ephPubkeyToX: bigint;
+    ephPubkeyToY: bigint;
+  };
+  /** Encrypted sender state for ShieldedCheckpoint.update(). */
+  checkpointPayload: CheckpointPayload;
+  /** Sender's new balance after transfer (for local state update). */
+  newBalance: bigint;
+  /** Sender's new blinding after transfer (for local state update). */
+  newBlinding: bigint;
+  /** Transfer blinding (needed if caller wants to reconstruct C_tx locally). */
+  transferBlinding: bigint;
+}
+
 export interface ShieldedTransferOrchestratePrebuiltInput {
   currentBalance: bigint;
   transferAmount: bigint;
   senderMemoKeypair: BabyJubKeypair;
   recipientMemoKey: Point;
   memo?: string;
-  tipId?: string;
-  /** Recipient hint stored in sender's v3 snapshot (Cadence address or COA EVM hex). */
-  recipient?: string;
   /** Pre-built ConfidentialTransfer proof (uint256[8]). */
   proof: ProofUint256;
   /** Public inputs [C_old.x, C_old.y, C_tx.x, C_tx.y, C_new.x, C_new.y]. */
   publicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
   /** Transfer blinding used when computing C_tx (needed for recipient note). */
   transferBlinding: bigint;
-  /** New blinding for the residual commitment (needed for snapshot). */
+  /** New blinding for the residual commitment (needed for checkpoint). */
   newBlinding: bigint;
 }
 
-/**
- * Orchestrate a shielded transfer with a pre-built proof (browser-safe path).
- *
- * Skips buildShieldedTransferProof (Node.js only). Performs only snapshot
- * and note encryption (pure ECIES crypto, browser-safe).
- */
-export async function orchestrateShieldedTransferWithPrebuiltProof(
-  input: ShieldedTransferOrchestratePrebuiltInput
-): Promise<ShieldedTransferOrchestrateResult> {
-  const {
-    currentBalance,
-    transferAmount,
-    senderMemoKeypair,
-    recipientMemoKey,
-    memo,
-    tipId,
-    recipient,
-    proof,
-    publicInputs,
-    transferBlinding,
-    newBlinding,
-  } = input;
-
-  if (transferAmount <= 0n) {
-    throw new RangeError(
-      `orchestrateShieldedTransferWithPrebuiltProof: transferAmount must be > 0, got ${transferAmount}`
-    );
-  }
-  if (transferAmount > currentBalance) {
-    throw new RangeError(
-      `orchestrateShieldedTransferWithPrebuiltProof: transferAmount ${transferAmount} exceeds balance ${currentBalance}`
-    );
-  }
-
-  const newBalance = currentBalance - transferAmount;
-  const nowMs = Date.now();
-
-  // Encrypt sender's residual snapshot (ephemeral A) — v3 includes transfer metadata
-  const snapshotEnc = await encryptSnapshot(
-    {
-      balance: newBalance,
-      blinding: newBlinding,
-      timestampMs: nowMs,
-      txAmt: transferAmount,
-      rcp: recipient ?? "",
-      memo: memo ?? "",
-    },
-    senderMemoKeypair.pubkey
-  );
-
-  // Encrypt note to recipient (ephemeral B — different ephemeral)
-  const noteEnc = await encryptNote(
-    { amount: transferAmount, blinding: transferBlinding, memo, tipId },
-    recipientMemoKey
-  );
-
-  return {
-    publicInputs,
-    proof,
-    encryptedSnapshot: snapshotEnc.ciphertext,
-    ephPubkeyX: snapshotEnc.ephemeralPubkey.x,
-    ephPubkeyY: snapshotEnc.ephemeralPubkey.y,
-    encryptedNoteTo: noteEnc.ciphertext,
-    ephPubkeyToX: noteEnc.ephemeralPubkey.x,
-    ephPubkeyToY: noteEnc.ephemeralPubkey.y,
-    newBalance,
-    newBlinding,
-    transferBlinding,
-  };
-}
+// ---------------------------------------------------------------------------
+// Core orchestration
+// ---------------------------------------------------------------------------
 
 /**
  * Orchestrate a shielded transfer.
- * Returns all params the adapter needs to call shieldedTransfer(to, ...).
+ * Returns txParams (for shieldedTransfer calldata) + checkpointPayload (for ShieldedCheckpoint.update).
  */
 export async function orchestrateShieldedTransfer(
   input: ShieldedTransferOrchestrateInput
@@ -165,8 +106,6 @@ export async function orchestrateShieldedTransfer(
     senderMemoKeypair,
     recipientMemoKey,
     memo,
-    tipId,
-    recipient,
   } = input;
 
   if (transferAmount <= 0n) {
@@ -194,36 +133,98 @@ export async function orchestrateShieldedTransfer(
   });
 
   const newBalance = currentBalance - transferAmount;
-  const nowMs = Date.now();
 
-  // 3. Encrypt sender's residual snapshot to their own memokey (ephemeral A) — v3 includes transfer metadata
-  const snapshotEnc = await encryptSnapshot(
-    {
-      balance: newBalance,
-      blinding: newBlinding,
-      timestampMs: nowMs,
-      txAmt: transferAmount,
-      rcp: recipient ?? "",
-      memo: memo ?? "",
-    },
-    senderMemoKeypair.pubkey
-  );
-
-  // 4. Encrypt note to recipient's memokey (ephemeral B — different ephemeral)
+  // 3. Encrypt note to recipient's memokey
   const noteEnc = await encryptNote(
-    { amount: transferAmount, blinding: transferBlinding, memo, tipId },
+    { amount: transferAmount, blinding: transferBlinding, memo },
     recipientMemoKey
   );
 
+  // 4. Encrypt sender's residual snapshot to their own memokey
+  const snapshotEnc = await encryptSnapshot(
+    { balance: newBalance, blinding: newBlinding },
+    senderMemoKeypair.pubkey
+  );
+
   return {
-    publicInputs: proofResult.publicInputs,
-    proof: proofResult.proof,
-    encryptedSnapshot: snapshotEnc.ciphertext,
-    ephPubkeyX: snapshotEnc.ephemeralPubkey.x,
-    ephPubkeyY: snapshotEnc.ephemeralPubkey.y,
-    encryptedNoteTo: noteEnc.ciphertext,
-    ephPubkeyToX: noteEnc.ephemeralPubkey.x,
-    ephPubkeyToY: noteEnc.ephemeralPubkey.y,
+    txParams: {
+      publicInputs: proofResult.publicInputs,
+      proof: proofResult.proof,
+      encryptedNoteTo: noteEnc.ciphertext,
+      ephPubkeyToX: noteEnc.ephemeralPubkey.x,
+      ephPubkeyToY: noteEnc.ephemeralPubkey.y,
+    },
+    checkpointPayload: {
+      encryptedSnapshot: snapshotEnc.ciphertext,
+      ephPubkeyX: snapshotEnc.ephemeralPubkey.x,
+      ephPubkeyY: snapshotEnc.ephemeralPubkey.y,
+    },
+    newBalance,
+    newBlinding,
+    transferBlinding,
+  };
+}
+
+/**
+ * Orchestrate a shielded transfer with a pre-built proof (browser-safe path).
+ *
+ * Skips buildShieldedTransferProof (Node.js only). Performs only ECIES
+ * encryption for the recipient note and sender checkpoint, which is pure crypto
+ * and browser-safe. The proof must have been generated server-side.
+ */
+export async function orchestrateShieldedTransferWithPrebuiltProof(
+  input: ShieldedTransferOrchestratePrebuiltInput
+): Promise<ShieldedTransferOrchestrateResult> {
+  const {
+    currentBalance,
+    transferAmount,
+    senderMemoKeypair,
+    recipientMemoKey,
+    memo,
+    proof,
+    publicInputs,
+    transferBlinding,
+    newBlinding,
+  } = input;
+
+  if (transferAmount <= 0n) {
+    throw new RangeError(
+      `orchestrateShieldedTransferWithPrebuiltProof: transferAmount must be > 0, got ${transferAmount}`
+    );
+  }
+  if (transferAmount > currentBalance) {
+    throw new RangeError(
+      `orchestrateShieldedTransferWithPrebuiltProof: transferAmount ${transferAmount} exceeds balance ${currentBalance}`
+    );
+  }
+
+  const newBalance = currentBalance - transferAmount;
+
+  // Encrypt note to recipient (uses its own ephemeral)
+  const noteEnc = await encryptNote(
+    { amount: transferAmount, blinding: transferBlinding, memo },
+    recipientMemoKey
+  );
+
+  // Encrypt sender's residual snapshot (uses a different ephemeral)
+  const snapshotEnc = await encryptSnapshot(
+    { balance: newBalance, blinding: newBlinding },
+    senderMemoKeypair.pubkey
+  );
+
+  return {
+    txParams: {
+      publicInputs,
+      proof,
+      encryptedNoteTo: noteEnc.ciphertext,
+      ephPubkeyToX: noteEnc.ephemeralPubkey.x,
+      ephPubkeyToY: noteEnc.ephemeralPubkey.y,
+    },
+    checkpointPayload: {
+      encryptedSnapshot: snapshotEnc.ciphertext,
+      ephPubkeyX: snapshotEnc.ephemeralPubkey.x,
+      ephPubkeyY: snapshotEnc.ephemeralPubkey.y,
+    },
     newBalance,
     newBlinding,
     transferBlinding,

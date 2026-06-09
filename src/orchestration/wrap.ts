@@ -132,9 +132,8 @@ export async function orchestrateWrapWithPrebuiltProof(
     );
   }
 
-  const nowMs = Date.now();
   const snapshotEnc = await encryptSnapshot(
-    { balance: netAmount, blinding, timestampMs: nowMs },
+    { balance: netAmount, blinding },
     senderMemoKeypair.pubkey
   );
 
@@ -182,9 +181,8 @@ export async function orchestrateWrap(
   const proofResult = await buildAmountDiscloseProof({ amount: netAmount, blinding, nonce });
 
   // 5. Encrypt snapshot to sender's own memokey
-  const nowMs = Date.now();
   const snapshotEnc = await encryptSnapshot(
-    { balance: netAmount, blinding, timestampMs: nowMs },
+    { balance: netAmount, blinding },
     senderMemoKeypair.pubkey
   );
 

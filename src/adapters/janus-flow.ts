@@ -1,26 +1,20 @@
 /**
- * adapters/janus-flow.ts — JanusTokenAdapter for variant="native" (JanusFlow v0.7+).
+ * adapters/janus-flow.ts — JanusTokenAdapter for variant="native" (JanusFlow v0.8).
  *
  * Wraps native FLOW via msg.value. One instance per proxy address.
- * Parameterized by TOKEN_REGISTRY entry — not a separate class per token.
  *
- * v0.7 change: wrap() now calls wrapWithProof() with split pA/pB/pC proof
- * and a nonce for anti-replay protection (aggregate 2-gen Pedersen circuit).
- *
- * ABI surface (v0.7 proxy):
- *   wrapWithProof(uint256 nonce, uint256[2] commit, uint256[2] pA, uint256[2][2] pB, uint256[2] pC, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable
- *   shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY) external
- *   unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external
+ * v0.8 ABI surface (proxy at 0xA64340C1d356835A2450306Ffd290Ed52c001Ad3):
+ *   wrapWithProof(uint256 nonce, uint256[2] commit, uint256[2] pA, uint256[2][2] pB, uint256[2] pC, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) payable
+ *   shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY)
+ *   unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY)
  *   feeBps() view returns (uint16)
  *   feeRecipient() view returns (address)
- *   firstSnapshotBlock(address) view returns (uint256)
  *   balanceOfCommitmentXY(address) view returns (uint256, uint256)
  *   memoRegistry() view returns (address)
  *
- * MemoKeyRegistry ABI (for publishMemoKey / rotateMemoKey / getMemoKey):
- *   publishMemoKey(uint256 x, uint256 y) external
- *   rotateMemoKey(uint256 newX, uint256 newY) external
- *   getMemoKey(address user) view returns (uint256 x, uint256 y, uint256 publishedAt)
+ * Key v0.8 change: shieldedTransfer is NOW 6-arg (no sender-snapshot calldata).
+ * Sender snapshot goes to ShieldedCheckpoint.update() separately.
+ * Inbox.deposit() is called INTERNALLY by the token contract — do not call directly.
  */
 
 import { ethers } from "ethers";
@@ -34,7 +28,6 @@ import type {
   UnwrapParams,
   UnwrapResult,
   TxResult,
-  DepositRecord,
   NoteContent,
   SnapshotContent,
 } from "../types";
@@ -43,93 +36,74 @@ import type { ProofUint256 } from "../types/proof";
 import type { NativeTokenEntry } from "../types";
 import { FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS } from "../network/contracts";
 import { orchestrateWrap, orchestrateWrapWithPrebuiltProof } from "../orchestration/wrap";
+import { orchestrateShieldedTransfer, orchestrateShieldedTransferWithPrebuiltProof } from "../orchestration/shielded-transfer";
+import { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "../orchestration/unwrap";
 import { splitProof } from "../utils/pi-b-swap";
+import { decryptNote } from "../crypto/note-helpers";
+import { decryptSnapshot } from "../crypto/checkpoint-schema";
 
-/**
- * Pre-built proof from a server-side route (browser callers).
- * buildAmountDiscloseProof requires Node.js (wasm/zkey file I/O), so browser
- * callers POST to /api/proof/wrap, receive these fields, and pass them here.
- */
+// ---------------------------------------------------------------------------
+// Pre-built proof types (for browser callers that generate proofs server-side)
+// ---------------------------------------------------------------------------
+
 export interface WrapViaCoaPrebuiltProof {
-  /** Groth16 proof as uint256[8] (EVM-ready, pi_b Fp2-swapped). */
   proof: ProofUint256;
-  /** 2-gen Pedersen commitment point from the circuit. */
   txCommit: readonly [bigint, bigint];
-  /** Blinding factor generated client-side before the API call. */
   blinding: bigint;
-  /** Nonce used in the proof. */
   nonce: bigint;
-  /** Public inputs [netAmount, Cx, Cy, nonce] — 4 signals (aggregate circuit). */
   publicInputs: readonly [bigint, bigint, bigint, bigint];
 }
 
-/**
- * Pre-built ConfidentialTransfer proof for shieldedTransferViaCoa (browser callers).
- * POST to /api/proof/shielded-transfer to get proof + publicInputs.
- */
 export interface ShieldedTransferViaCoaPrebuiltProof {
-  /** ConfidentialTransfer proof (uint256[8]). */
   proof: ProofUint256;
-  /** Public inputs [C_old.x,y, C_tx.x,y, C_new.x,y] (uint256[6]). */
   publicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
-  /** Transfer blinding (needed for note encryption to recipient). */
   transferBlinding: bigint;
-  /** New blinding for residual commitment (needed for snapshot encryption). */
   newBlinding: bigint;
 }
 
-/**
- * Pre-built proofs for unwrapViaCoa (browser callers).
- * POST to /api/proof/unwrap to get both proofs.
- */
 export interface UnwrapViaCoaPrebuiltProofs {
-  /** AmountDisclose proof (uint256[8]) for claimedAmount. */
   amountProof: ProofUint256;
-  /** AmountDisclose txCommit [Cx, Cy]. */
   txCommit: readonly [bigint, bigint];
-  /** AmountDisclose publicInputs [claimedAmount, Cx, Cy, nonce] — 4 signals. */
   amountPublicInputs: readonly [bigint, bigint, bigint, bigint];
-  /** ConfidentialTransfer proof (uint256[8]) for the residual spend. */
   transferProof: ProofUint256;
-  /** ConfidentialTransfer publicInputs [C_old.x,y, C_tx.x,y, C_new.x,y]. */
   transferPublicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
-  /** New blinding for residual commitment (needed for snapshot encryption). */
   newBlinding: bigint;
-  /** Nonce used in the amount-disclose proof. */
   nonce: bigint;
 }
-import { orchestrateShieldedTransfer, orchestrateShieldedTransferWithPrebuiltProof } from "../orchestration/shielded-transfer";
-import { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "../orchestration/unwrap";
-import { decryptSnapshot } from "../crypto/snapshot-schema";
-import { decryptNote } from "../crypto/note-schema";
-import { scanIncomingNotes } from "../scan/event-scanner";
-import { getLatestSnapshot } from "../scan/latest-snapshot";
-import type { DecryptedAnyNote } from "../crypto/decrypt-any-note";
+
+// ---------------------------------------------------------------------------
+// ABI
+// ---------------------------------------------------------------------------
 
 const NATIVE_ABI = [
+  // wrap — payable, nonce-based anti-replay
   "function wrapWithProof(uint256 nonce, uint256[2] commit, uint256[2] pA, uint256[2][2] pB, uint256[2] pC, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external payable",
-  "function shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY) external",
+  // transfer — v0.8: 6 args (no sender snapshot)
+  "function shieldedTransfer(address to, uint256[6] publicInputs, uint256[8] proof, bytes encryptedNoteTo, uint256 ephPubkeyToX, uint256 ephPubkeyToY) external",
+  // unwrap — snapshot still included (senderʼs residual after claiming)
   "function unwrap(uint256 claimedAmount, address recipient, uint256[2] txCommit, uint256[8] amountProof, uint256[6] transferPublicInputs, uint256[8] transferProof, bytes encryptedSnapshot, uint256 ephPubkeyX, uint256 ephPubkeyY) external",
+  // view
   "function feeBps() view returns (uint16)",
   "function feeRecipient() view returns (address)",
-  "function firstSnapshotBlock(address) view returns (uint256)",
   "function balanceOfCommitmentXY(address) view returns (uint256, uint256)",
   "function memoRegistry() view returns (address)",
 ] as const;
 
-/** v0.6.3 — MemoKey operations go directly to the shared registry. */
 const MEMO_REGISTRY_ABI = [
   "function publishMemoKey(uint256 x, uint256 y) external",
   "function rotateMemoKey(uint256 newX, uint256 newY) external",
   "function getMemoKey(address user) view returns (uint256 x, uint256 y, uint256 publishedAt)",
 ] as const;
 
+// ---------------------------------------------------------------------------
+// Adapter implementation
+// ---------------------------------------------------------------------------
+
 export class JanusFlowAdapter implements JanusTokenAdapter {
   readonly id: string;
   readonly variant = "native" as const;
   readonly address: string;
   readonly decimals: number;
-  /** Address of the shared MemoKeyRegistry (defaults to MEMO_REGISTRY_ADDRESS). */
   readonly memoRegistryAddress: string;
 
   private readonly provider: ethers.JsonRpcProvider;
@@ -150,12 +124,10 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
     return new ethers.Contract(this.address, NATIVE_ABI, signer);
   }
 
-  /** Read-only handle on the shared MemoKeyRegistry. */
   private _registry(): ethers.Contract {
     return new ethers.Contract(this.memoRegistryAddress, MEMO_REGISTRY_ABI, this.provider);
   }
 
-  /** Read-write handle on the shared MemoKeyRegistry (requires signer). */
   private _registryRw(signer: EVMSigner): ethers.Contract {
     return new ethers.Contract(this.memoRegistryAddress, MEMO_REGISTRY_ABI, signer);
   }
@@ -170,17 +142,12 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
   }
 
   async getMemoKey(addr: string): Promise<{ x: bigint; y: bigint } | null> {
-    // v0.6.3: reads from the shared MemoKeyRegistry, not the per-token mapping.
     const [x, y, publishedAt] = await this._registry().getMemoKey(addr);
     const xb = BigInt(x);
     const yb = BigInt(y);
     if (xb === 0n && yb === 0n) return null;
+    void publishedAt;
     return { x: xb, y: yb };
-  }
-
-  async getFirstSnapshotBlock(addr: string): Promise<bigint> {
-    const v = await this._ro().firstSnapshotBlock(addr);
-    return BigInt(v);
   }
 
   async feeBps(): Promise<number> {
@@ -199,8 +166,6 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
   }
 
   async publishMemoKey(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult> {
-    // v0.6.3: publishes to the shared MemoKeyRegistry directly (NOT the token proxy).
-    // One tx registers the user's key for ALL Janus EVM tokens simultaneously.
     const tx = await this._registryRw(signer).publishMemoKey(
       memoKeypair.pubkey.x,
       memoKeypair.pubkey.y
@@ -209,7 +174,6 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
     return { txHash: receipt.hash };
   }
 
-  /** Rotate the caller's BabyJub pubkey in the shared registry. */
   async rotateMemoKey(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult> {
     const tx = await this._registryRw(signer).rotateMemoKey(
       memoKeypair.pubkey.x,
@@ -221,7 +185,6 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
 
   async wrap(params: WrapParams, signer: EVMSigner): Promise<WrapResult> {
     const bps = await this.feeBps();
-    // We need the sender's memokey to encrypt the snapshot — read from chain
     const signerAddr = await signer.getAddress();
     const memoKey = await this.getMemoKey(signerAddr);
     if (!memoKey) {
@@ -229,8 +192,6 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
         `JanusFlowAdapter.wrap: signer ${signerAddr} has no registered memoKey. Call publishMemoKey first.`
       );
     }
-    // Orchestrate: gross→net→proof→encrypt snapshot
-    // We pass a minimal keypair shape (pubkey only needed for snapshot encryption)
     const orch = await orchestrateWrap({
       grossAmount: params.grossAmount,
       feeBps: bps,
@@ -255,44 +216,21 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
   }
 
   /**
-   * wrapViaCoa — Flow-Wallet / FCL path.
-   *
-   * Dispatches a Cadence transaction signed by the user's Flow Wallet.
-   * The user's COA (at /storage/evm) is the msg.sender JanusFlow sees,
-   * so the MemoKey registered by smartSetupAccount() is found correctly.
-   *
-   * Use this method in browser contexts where FCL is available and the
-   * user authenticates via Flow Wallet. The original wrap() is kept for
-   * non-FCL consumers (CLI, scripts, automation, demos).
-   *
-   * @param params.grossAmount    Gross FLOW in wei (18 decimals).
-   * @param params.coaEvmAddr    User's COA EVM hex address (0x…, 42 chars).
-   *                              Used to look up their MemoKey from the registry.
-   * @param params.prebuiltProof  Optional: pre-built proof from a server-side API
-   *                              route (POST /api/proof/wrap). Required when calling
-   *                              from a browser, because buildAmountDiscloseProof
-   *                              needs Node.js wasm/zkey file I/O. If omitted, the
-   *                              SDK builds the proof inline (Node.js callers only).
+   * wrapViaCoa — Flow-Wallet / FCL path for wrap.
+   * Dispatches a Cadence transaction via the user's COA.
    */
   async wrapViaCoa(
     params: WrapParams & { coaEvmAddr: string; prebuiltProof?: WrapViaCoaPrebuiltProof }
   ): Promise<WrapResult> {
-    // Dynamic FCL import — only available in browser/FCL environments.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fcl: any = await import("@onflow/fcl");
-
     const bps = await this.feeBps();
-
-    // Look up the MemoKey registered under the user's COA address.
     const memoKey = await this.getMemoKey(params.coaEvmAddr);
     if (!memoKey) {
       throw new Error(
-        `JanusFlowAdapter.wrapViaCoa: COA ${params.coaEvmAddr} has no registered memoKey. Run smartSetupAccount first.`
+        `JanusFlowAdapter.wrapViaCoa: COA ${params.coaEvmAddr} has no registered memoKey.`
       );
     }
-
-    // Orchestrate: use pre-built proof if provided (browser path), otherwise
-    // build proof inline (Node.js callers — buildAmountDiscloseProof is safe).
     const orch = params.prebuiltProof
       ? await orchestrateWrapWithPrebuiltProof({
           grossAmount: params.grossAmount,
@@ -310,8 +248,6 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
           senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
         });
 
-    // ABI-encode the JanusFlow.wrapWithProof call as calldata.
-    // Signature: wrapWithProof(uint256,uint256[2],uint256[2],uint256[2][2],uint256[2],bytes,uint256,uint256)
     const { pA, pB, pC } = splitProof(orch.amountProof);
     const iface = new ethers.Interface(NATIVE_ABI);
     const calldata = iface.encodeFunctionData("wrapWithProof", [
@@ -324,21 +260,16 @@ export class JanusFlowAdapter implements JanusTokenAdapter {
       orch.ephPubkeyX,
       orch.ephPubkeyY,
     ]);
-    // Strip "0x" for Cadence String arg.
     const calldataHex = calldata.slice(2);
 
-    // grossAmount in attoflow (1 FLOW = 10^18 attoflow). UFix64 string is "N.XXXXXXXX"
-    // where N = whole FLOW count and XXXXXXXX is the 8-decimal fraction.
-    // attoflow / 10^18 → whole FLOW; (attoflow % 10^18) / 10^10 → 8-decimal fraction.
     const attoflowBig = params.grossAmount;
-    const flowScale = 1_000_000_000_000_000_000n; // 10^18 attoflow per FLOW
-    const ufixFracScale = 10_000_000_000n;         // 10^10 attoflow per UFix64 fractional unit
+    const flowScale = 1_000_000_000_000_000_000n;
+    const ufixFracScale = 10_000_000_000n;
     const whole = attoflowBig / flowScale;
     const fracAttoflow = attoflowBig % flowScale;
     const fracUfix64 = fracAttoflow / ufixFracScale;
     const amountUFix64 = `${whole}.${fracUfix64.toString().padStart(8, "0")}`;
 
-    // Cadence tx: withdraw FLOW from vault → deposit into COA → coa.call JanusFlow.wrap
     const cadenceTx = `
 import FungibleToken from 0x9a0766d93b6608b7
 import FlowToken from 0x7e60df042a9c0868
@@ -348,16 +279,12 @@ transaction(amountUFix64: UFix64, calldataHex: String, proxyHex: String, attoflo
   prepare(signer: auth(BorrowValue, Storage) &Account) {
     let coa = signer.storage.borrow<auth(EVM.Call, EVM.Owner) &EVM.CadenceOwnedAccount>(
       from: /storage/evm
-    ) ?? panic("No COA at /storage/evm — run smartSetupAccount first")
-
-    // Withdraw FLOW from Cadence vault and deposit into COA EVM balance.
+    ) ?? panic("No COA at /storage/evm — run setup_coa first")
     let flowVault = signer.storage.borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(
       from: /storage/flowTokenVault
-    ) ?? panic("No FlowToken vault at /storage/flowTokenVault")
+    ) ?? panic("No FlowToken vault")
     let payment <- flowVault.withdraw(amount: amountUFix64) as! @FlowToken.Vault
     coa.deposit(from: <-payment)
-
-    // Call JanusFlow.wrap with msg.value = grossAmount in attoflow.
     let result = coa.call(
       to: EVM.addressFromString(proxyHex),
       data: calldataHex.decodeHex(),
@@ -365,11 +292,10 @@ transaction(amountUFix64: UFix64, calldataHex: String, proxyHex: String, attoflo
       value: EVM.Balance(attoflow: attoflowWei)
     )
     assert(result.status == EVM.Status.successful,
-      message: "JanusFlow.wrap reverted — errorCode: ".concat(result.errorCode.toString()).concat(" ").concat(result.errorMessage).concat(" data: 0x").concat(String.encodeHex(result.data)))
+      message: "JanusFlow.wrapWithProof reverted: ".concat(result.errorMessage))
   }
 }
 `;
-
     const txId: string = await fcl.mutate({
       cadence: cadenceTx,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -388,6 +314,10 @@ transaction(amountUFix64: UFix64, calldataHex: String, proxyHex: String, attoflo
     return { txHash: txId, netAmount: orch.netAmount, fee: orch.fee };
   }
 
+  /**
+   * shieldedTransfer — v0.8 6-arg ABI (no sender snapshot in calldata).
+   * Returns checkpointPayload so caller can update ShieldedCheckpoint separately.
+   */
   async shieldedTransfer(params: SendParams, signer: EVMSigner): Promise<SendResult> {
     const signerAddr = await signer.getAddress();
     const [senderMemoKey, recipientMemoKey] = await Promise.all([
@@ -395,7 +325,7 @@ transaction(amountUFix64: UFix64, calldataHex: String, proxyHex: String, attoflo
       this.getMemoKey(params.recipient),
     ]);
     if (!senderMemoKey) {
-      throw new Error(`JanusFlowAdapter.shieldedTransfer: sender has no memoKey`);
+      throw new Error(`JanusFlowAdapter.shieldedTransfer: sender ${signerAddr} has no memoKey`);
     }
     if (!recipientMemoKey) {
       throw new Error(
@@ -409,56 +339,46 @@ transaction(amountUFix64: UFix64, calldataHex: String, proxyHex: String, attoflo
       senderMemoKeypair: { privkey: 0n, pubkey: senderMemoKey },
       recipientMemoKey,
       memo: params.memo,
-      recipient: params.recipient,
     });
 
     const contract = this._rw(signer);
+    // 6-arg v0.8 signature
     const tx = await contract.shieldedTransfer(
       params.recipient,
-      [...orch.publicInputs],
-      [...orch.proof],
-      ethers.hexlify(orch.encryptedSnapshot),
-      orch.ephPubkeyX,
-      orch.ephPubkeyY,
-      ethers.hexlify(orch.encryptedNoteTo),
-      orch.ephPubkeyToX,
-      orch.ephPubkeyToY
+      [...orch.txParams.publicInputs],
+      [...orch.txParams.proof],
+      ethers.hexlify(orch.txParams.encryptedNoteTo),
+      orch.txParams.ephPubkeyToX,
+      orch.txParams.ephPubkeyToY
     );
     const receipt = await tx.wait();
-    return { txHash: receipt.hash };
+    return {
+      txHash: receipt.hash,
+      checkpointPayload: orch.checkpointPayload,
+      newBalance: orch.newBalance,
+      newBlinding: orch.newBlinding,
+    };
   }
 
   /**
-   * shieldedTransferViaCoa — Flow-Wallet / FCL path for shielded transfers.
-   *
-   * Dispatches a Cadence transaction that calls JanusFlow.shieldedTransfer via
-   * the user's COA. The COA address must match the memoKey registration.
-   *
-   * @param params.coaEvmAddr         User's COA EVM hex address.
-   * @param params.prebuiltProof      Optional: pre-built proof from /api/proof/shielded-transfer.
-   *                                  Required in browser — skips Node.js-only proof building.
+   * shieldedTransferViaCoa — FCL path (COA is msg.sender).
+   * Returns checkpointPayload for a follow-up ShieldedCheckpoint.update().
    */
   async shieldedTransferViaCoa(
     params: SendParams & { coaEvmAddr: string; prebuiltProof?: ShieldedTransferViaCoaPrebuiltProof }
   ): Promise<SendResult> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fcl: any = await import("@onflow/fcl");
-
     const [senderMemoKey, recipientMemoKey] = await Promise.all([
       this.getMemoKey(params.coaEvmAddr),
       this.getMemoKey(params.recipient),
     ]);
     if (!senderMemoKey) {
-      throw new Error(
-        `JanusFlowAdapter.shieldedTransferViaCoa: COA ${params.coaEvmAddr} has no registered memoKey. Run smartSetupAccount first.`
-      );
+      throw new Error(`JanusFlowAdapter.shieldedTransferViaCoa: no memoKey for COA ${params.coaEvmAddr}`);
     }
     if (!recipientMemoKey) {
-      throw new Error(
-        `JanusFlowAdapter.shieldedTransferViaCoa: recipient ${params.recipient} has no memoKey`
-      );
+      throw new Error(`JanusFlowAdapter.shieldedTransferViaCoa: recipient ${params.recipient} has no memoKey`);
     }
-
     const orch = params.prebuiltProof
       ? await orchestrateShieldedTransferWithPrebuiltProof({
           currentBalance: params.currentBalance,
@@ -466,7 +386,6 @@ transaction(amountUFix64: UFix64, calldataHex: String, proxyHex: String, attoflo
           senderMemoKeypair: { privkey: 0n, pubkey: senderMemoKey },
           recipientMemoKey,
           memo: params.memo,
-          recipient: params.recipient,
           proof: params.prebuiltProof.proof,
           publicInputs: params.prebuiltProof.publicInputs,
           transferBlinding: params.prebuiltProof.transferBlinding,
@@ -479,20 +398,16 @@ transaction(amountUFix64: UFix64, calldataHex: String, proxyHex: String, attoflo
           senderMemoKeypair: { privkey: 0n, pubkey: senderMemoKey },
           recipientMemoKey,
           memo: params.memo,
-          recipient: params.recipient,
         });
 
     const iface = new ethers.Interface(NATIVE_ABI);
     const calldata = iface.encodeFunctionData("shieldedTransfer", [
       params.recipient,
-      [...orch.publicInputs],
-      [...orch.proof],
-      ethers.hexlify(orch.encryptedSnapshot),
-      orch.ephPubkeyX,
-      orch.ephPubkeyY,
-      ethers.hexlify(orch.encryptedNoteTo),
-      orch.ephPubkeyToX,
-      orch.ephPubkeyToY,
+      [...orch.txParams.publicInputs],
+      [...orch.txParams.proof],
+      ethers.hexlify(orch.txParams.encryptedNoteTo),
+      orch.txParams.ephPubkeyToX,
+      orch.txParams.ephPubkeyToY,
     ]);
     const calldataHex = calldata.slice(2);
 
@@ -503,8 +418,7 @@ transaction(calldataHex: String, proxyHex: String) {
   prepare(signer: auth(BorrowValue, Storage) &Account) {
     let coa = signer.storage.borrow<auth(EVM.Call, EVM.Owner) &EVM.CadenceOwnedAccount>(
       from: /storage/evm
-    ) ?? panic("No COA at /storage/evm — run smartSetupAccount first")
-
+    ) ?? panic("No COA at /storage/evm")
     let result = coa.call(
       to: EVM.addressFromString(proxyHex),
       data: calldataHex.decodeHex(),
@@ -512,14 +426,10 @@ transaction(calldataHex: String, proxyHex: String) {
       value: EVM.Balance(attoflow: 0)
     )
     assert(result.status == EVM.Status.successful,
-      message: "JanusFlow.shieldedTransfer reverted — errorCode: "
-        .concat(result.errorCode.toString())
-        .concat(" msg: ").concat(result.errorMessage)
-        .concat(" data: 0x").concat(String.encodeHex(result.data)))
+      message: "JanusFlow.shieldedTransfer reverted: ".concat(result.errorMessage))
   }
 }
 `;
-
     const txId: string = await fcl.mutate({
       cadence: cadenceTx,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -533,35 +443,58 @@ transaction(calldataHex: String, proxyHex: String) {
       limit: 9999,
     });
     await fcl.tx(txId).onceSealed();
-    return { txHash: txId };
+    return {
+      txHash: txId,
+      checkpointPayload: orch.checkpointPayload,
+      newBalance: orch.newBalance,
+      newBlinding: orch.newBlinding,
+    };
+  }
+
+  async unwrap(params: UnwrapParams, signer: EVMSigner): Promise<UnwrapResult> {
+    const signerAddr = await signer.getAddress();
+    const bps = await this.feeBps();
+    const memoKey = await this.getMemoKey(signerAddr);
+    if (!memoKey) {
+      throw new Error(`JanusFlowAdapter.unwrap: signer has no memoKey`);
+    }
+    const orch = await orchestrateUnwrap({
+      claimedAmount: params.claimedAmount,
+      feeBps: bps,
+      currentBalance: params.currentBalance,
+      currentBlinding: params.currentBlinding,
+      senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
+    });
+
+    const contract = this._rw(signer);
+    const tx = await contract.unwrap(
+      orch.claimedAmount,
+      params.recipient,
+      [orch.txCommit[0], orch.txCommit[1]],
+      [...orch.amountProof],
+      [...orch.transferPublicInputs],
+      [...orch.transferProof],
+      ethers.hexlify(orch.encryptedSnapshot),
+      orch.ephPubkeyX,
+      orch.ephPubkeyY
+    );
+    const receipt = await tx.wait();
+    return { txHash: receipt.hash, netToRecipient: orch.netToRecipient };
   }
 
   /**
-   * unwrapViaCoa — Flow-Wallet / FCL path for unwrapping.
-   *
-   * Dispatches a Cadence transaction that calls JanusFlow.unwrap via the user's COA.
-   * The FLOW is sent from the EVM contract back to the COA, which bridges it to
-   * the Cadence vault automatically.
-   *
-   * @param params.coaEvmAddr          User's COA EVM hex address.
-   * @param params.prebuiltProofs      Optional: pre-built proofs from /api/proof/unwrap.
-   *                                   Required in browser — skips Node.js-only proof building.
+   * unwrapViaCoa — FCL path for unwrap.
    */
   async unwrapViaCoa(
     params: UnwrapParams & { coaEvmAddr: string; prebuiltProofs?: UnwrapViaCoaPrebuiltProofs }
   ): Promise<UnwrapResult> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fcl: any = await import("@onflow/fcl");
-
     const bps = await this.feeBps();
-
     const memoKey = await this.getMemoKey(params.coaEvmAddr);
     if (!memoKey) {
-      throw new Error(
-        `JanusFlowAdapter.unwrapViaCoa: COA ${params.coaEvmAddr} has no registered memoKey. Run smartSetupAccount first.`
-      );
+      throw new Error(`JanusFlowAdapter.unwrapViaCoa: no memoKey for COA ${params.coaEvmAddr}`);
     }
-
     const orch = params.prebuiltProofs
       ? await orchestrateUnwrapWithPrebuiltProofs({
           claimedAmount: params.claimedAmount,
@@ -605,8 +538,7 @@ transaction(calldataHex: String, proxyHex: String) {
   prepare(signer: auth(BorrowValue, Storage) &Account) {
     let coa = signer.storage.borrow<auth(EVM.Call, EVM.Owner) &EVM.CadenceOwnedAccount>(
       from: /storage/evm
-    ) ?? panic("No COA at /storage/evm — run smartSetupAccount first")
-
+    ) ?? panic("No COA at /storage/evm")
     let result = coa.call(
       to: EVM.addressFromString(proxyHex),
       data: calldataHex.decodeHex(),
@@ -614,11 +546,10 @@ transaction(calldataHex: String, proxyHex: String) {
       value: EVM.Balance(attoflow: 0)
     )
     assert(result.status == EVM.Status.successful,
-      message: "JanusFlow.unwrap reverted — errorCode: ".concat(result.errorCode.toString()).concat(" ").concat(result.errorMessage).concat(" data: 0x").concat(String.encodeHex(result.data)))
+      message: "JanusFlow.unwrap reverted: ".concat(result.errorMessage))
   }
 }
 `;
-
     const txId: string = await fcl.mutate({
       cadence: cadenceTx,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -635,87 +566,13 @@ transaction(calldataHex: String, proxyHex: String) {
     return { txHash: txId, netToRecipient: orch.netToRecipient };
   }
 
-  async unwrap(params: UnwrapParams, signer: EVMSigner): Promise<UnwrapResult> {
-    const signerAddr = await signer.getAddress();
-    const bps = await this.feeBps();
-    const memoKey = await this.getMemoKey(signerAddr);
-    if (!memoKey) {
-      throw new Error(`JanusFlowAdapter.unwrap: signer has no memoKey`);
-    }
-    const orch = await orchestrateUnwrap({
-      claimedAmount: params.claimedAmount,
-      feeBps: bps,
-      currentBalance: params.currentBalance,
-      currentBlinding: params.currentBlinding,
-      senderMemoKeypair: { privkey: 0n, pubkey: memoKey },
-    });
-
-    const contract = this._rw(signer);
-    const tx = await contract.unwrap(
-      orch.claimedAmount,
-      params.recipient,
-      [orch.txCommit[0], orch.txCommit[1]],
-      [...orch.amountProof],
-      [...orch.transferPublicInputs],
-      [...orch.transferProof],
-      ethers.hexlify(orch.encryptedSnapshot),
-      orch.ephPubkeyX,
-      orch.ephPubkeyY
-    );
-    const receipt = await tx.wait();
-    return { txHash: receipt.hash, netToRecipient: orch.netToRecipient };
-  }
-
-  async scanDeposits(addr: string, fromBlock?: bigint): Promise<DepositRecord[]> {
-    return scanIncomingNotes(addr, this.address, this.provider, fromBlock !== undefined ? { fromBlock } : undefined);
-  }
-
   async decryptNoteTo(blob: Uint8Array, ephPub: Point, myMemoPrivKey: bigint): Promise<NoteContent> {
     return decryptNote(blob, ephPub, myMemoPrivKey);
-  }
-
-  /**
-   * Decrypt an incoming note using the v3 wire format (EVM path).
-   * Use this when you know the ciphertext came from a JanusFlow shielded transfer.
-   * For unknown token types, use the standalone decryptAnyNote() util instead.
-   */
-  async decryptIncomingNote(
-    ciphertext: Uint8Array | number[],
-    ephPubkey: { x: bigint; y: bigint } | [bigint, bigint],
-    memoPrivKey: bigint
-  ): Promise<DecryptedAnyNote | null> {
-    const ct = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext);
-    const pub = Array.isArray(ephPubkey)
-      ? { x: ephPubkey[0], y: ephPubkey[1] }
-      : ephPubkey;
-    try {
-      const v3 = await decryptNote(ct, pub, memoPrivKey);
-      return {
-        amount: v3.amount,
-        blinding: v3.blinding,
-        memo: v3.memo,
-        data: v3.memo,
-        tipId: v3.tipId,
-        wireFormat: "v3" as const,
-      };
-    } catch {
-      return null;
-    }
   }
 
   async decryptSnapshot(blob: Uint8Array, ephPub: Point, myMemoPrivKey: bigint): Promise<SnapshotContent> {
     const result = await decryptSnapshot(blob, ephPub, myMemoPrivKey);
     if (result === null) throw new Error("JanusFlowAdapter.decryptSnapshot: decryption failed");
     return result;
-  }
-
-  async latestSnapshot(addr: string, myMemoPrivKey: bigint): Promise<SnapshotContent> {
-    const snap = await getLatestSnapshot(addr, this.address, this.provider, myMemoPrivKey);
-    if (snap === null) {
-      throw new Error(
-        `JanusFlowAdapter.latestSnapshot: no valid snapshot found for ${addr}`
-      );
-    }
-    return snap;
   }
 }

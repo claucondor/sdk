@@ -1,9 +1,13 @@
 /**
  * adapters/JanusTokenAdapter.ts — The single adapter interface all tokens implement.
  *
- * Every concrete token (JanusFlow, JanusWFLOW, JanusMockUSDC, JanusFT) must
- * satisfy this interface. The frontend only ever calls methods on this interface —
- * it never touches proof generation, fee math, or snapshot ordering directly.
+ * v0.8 changes:
+ *   - shieldedTransfer: removed encryptedSnapshot / ephPubkeyX / ephPubkeyY from calldata.
+ *     The new 6-arg signature matches JanusFlow/JanusERC20 v0.8 ABI.
+ *   - SendResult: now returns checkpointPayload so callers can compose ShieldedCheckpoint.update().
+ *   - getFirstSnapshotBlock / scanDeposits / latestSnapshot: removed (superseded by ShieldedInbox).
+ *     Use ShieldedInboxClient.drain() for state recovery instead.
+ *   - decryptSnapshot still available for checkpoint decryption path.
  *
  * ALL orchestration (gross→net→proof→encrypt→tx) lives in src/orchestration/.
  * Adapters delegate to orchestration helpers; they do NOT re-implement logic.
@@ -18,7 +22,6 @@ import type {
   UnwrapParams,
   UnwrapResult,
   TxResult,
-  DepositRecord,
   NoteContent,
   SnapshotContent,
 } from "../types";
@@ -45,13 +48,6 @@ export interface JanusTokenAdapter {
   /** Registered BabyJub memo key, or null if not published. */
   getMemoKey(addr: string): Promise<{ x: bigint; y: bigint } | null>;
 
-  /**
-   * Block number of the first snapshot event for this address.
-   * Returns 0n if the address has never interacted with this contract.
-   * Used by scanDeposits to avoid scanning from genesis.
-   */
-  getFirstSnapshotBlock(addr: string): Promise<bigint>;
-
   /** Current fee rate in basis points (10 = 0.1%). */
   feeBps(): Promise<number>;
 
@@ -67,16 +63,15 @@ export interface JanusTokenAdapter {
   // ── Write (tx) ────────────────────────────────────────────────────────────
 
   /**
-   * Register the caller's BabyJub pubkey on-chain.
-   * v0.6.3: EVM adapters route this to the shared MemoKeyRegistry (one tx
-   * covers all Janus EVM tokens simultaneously). Call once; rotate later.
+   * Register the caller's BabyJub pubkey on-chain (MemoKeyRegistry).
+   * One tx covers all Janus EVM tokens simultaneously.
+   * Call once; rotate via rotateMemoKey if key is compromised.
    */
   publishMemoKey(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult>;
 
   /**
    * Rotate to a new BabyJub pubkey. Must have published first.
-   * v0.6.3: EVM adapters route this to the shared MemoKeyRegistry.
-   * Optional — not all adapters support rotation (Cadence FT adapter omits it).
+   * Optional — not all adapters support rotation.
    */
   rotateMemoKey?(memoKeypair: BabyJubKeypair, signer: EVMSigner): Promise<TxResult>;
 
@@ -88,7 +83,8 @@ export interface JanusTokenAdapter {
 
   /**
    * Shielded transfer to recipient.
-   * SDK internally: reads recipient memoKey → builds TWO ephemerals → 2 proofs → tx.
+   * v0.8: 6-arg calldata (no sender snapshot in tx). Returns checkpointPayload
+   * so callers can call ShieldedCheckpoint.update() after the transfer.
    */
   shieldedTransfer(params: SendParams, signer: EVMSigner): Promise<SendResult>;
 
@@ -98,14 +94,7 @@ export interface JanusTokenAdapter {
    */
   unwrap(params: UnwrapParams, signer: EVMSigner): Promise<UnwrapResult>;
 
-  // ── Scan & decrypt ────────────────────────────────────────────────────────
-
-  /**
-   * Scan on-chain events for deposits addressed to addr.
-   * Returns raw encrypted deposit records sorted by timestamp ascending.
-   * Pass fromBlock to override the firstSnapshotBlock hint.
-   */
-  scanDeposits(addr: string, fromBlock?: bigint): Promise<DepositRecord[]>;
+  // ── Decrypt ───────────────────────────────────────────────────────────────
 
   /**
    * Decrypt a note (sender→recipient ciphertext from shieldedTransfer).
@@ -114,15 +103,8 @@ export interface JanusTokenAdapter {
   decryptNoteTo(blob: Uint8Array, ephPub: Point, myMemoPrivKey: bigint): Promise<NoteContent>;
 
   /**
-   * Decrypt a snapshot (self-directed ciphertext from wrap/shieldedTransfer/unwrap).
-   * Returns SnapshotContent with balance, blinding, and timestampMs.
+   * Decrypt a checkpoint snapshot (self-directed ciphertext from wrap/unwrap or
+   * ShieldedCheckpoint.read()). Returns SnapshotContent with balance and blinding.
    */
   decryptSnapshot(blob: Uint8Array, ephPub: Point, myMemoPrivKey: bigint): Promise<SnapshotContent>;
-
-  /**
-   * Reconstruct current shielded state from on-chain events.
-   * Scans all snapshot events, decrypts them, orders by timestampMs desc,
-   * and returns the most recent valid SnapshotContent.
-   */
-  latestSnapshot(addr: string, myMemoPrivKey: bigint): Promise<SnapshotContent>;
 }
