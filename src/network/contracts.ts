@@ -17,6 +17,25 @@
  *   - New MemoKeyRegistry address
  *   - All Cadence contracts at 0x4b6bc58bc8bf5dcc
  *   - LEGACY_V071_JANUSFLOW_PROXY constant preserved for PrivateTip demo
+ *
+ * ─── Supported env vars (all optional — testnet values are the fallbacks) ───
+ *
+ *   FLOW_EVM_RPC            — EVM JSON-RPC endpoint
+ *                             default: https://testnet.evm.nodes.onflow.org
+ *   MEMO_REGISTRY_ADDRESS   — MemoKeyRegistry EVM contract address
+ *                             default: 0x361bD4d037838A3a9c5408AE465d36077800ee6c
+ *   JANUS_FLOW_PROXY        — JanusFlow (native FLOW) EVM proxy address
+ *                             default: 0xA64340C1d356835A2450306Ffd290Ed52c001Ad3
+ *   JANUS_ERC20_PROXY       — JanusERC20 (mUSDC) EVM proxy address
+ *                             default: 0xFD8F82bE1782AF1F85f4673065e94fb3F8D5387d
+ *   JANUS_ERC20_UNDERLYING  — MockUSDC (mUSDC) EVM underlying token address
+ *                             default: 0xd49Ff950279841aaEcf642E85C3a0bBc1FB4B524
+ *   MOCKFT_CADENCE_ADDRESS  — Cadence deployer address for JanusFT + MockFT
+ *                             default: 0x4b6bc58bc8bf5dcc
+ *
+ * Note: FungibleToken core address (0x9a0766d93b6608b7) is a Flow testnet
+ * system contract — not configurable per project, intentionally hard-coded.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import type {
@@ -28,22 +47,22 @@ import type {
 export const TOKEN_REGISTRY = {
   flow: {
     variant: "native",
-    proxy: "0xA64340C1d356835A2450306Ffd290Ed52c001Ad3",
+    proxy: process.env.JANUS_FLOW_PROXY ?? "0xA64340C1d356835A2450306Ffd290Ed52c001Ad3",
     decimals: 18,
   } satisfies NativeTokenEntry,
 
   mockusdc: {
     variant: "erc20",
-    proxy: "0xFD8F82bE1782AF1F85f4673065e94fb3F8D5387d",
-    underlying: "0xd49Ff950279841aaEcf642E85C3a0bBc1FB4B524", // MockUSDC (mUSDC)
+    proxy: process.env.JANUS_ERC20_PROXY ?? "0xFD8F82bE1782AF1F85f4673065e94fb3F8D5387d",
+    underlying: process.env.JANUS_ERC20_UNDERLYING ?? "0xd49Ff950279841aaEcf642E85C3a0bBc1FB4B524", // MockUSDC (mUSDC)
     decimals: 6,
   } satisfies ERC20TokenEntry,
 
   mockft: {
     variant: "cadence-ft",
-    cadenceAddress: "0x4b6bc58bc8bf5dcc",
+    cadenceAddress: process.env.MOCKFT_CADENCE_ADDRESS ?? "0x4b6bc58bc8bf5dcc",
     contractName: "JanusFT",
-    ftAddress: "0x4b6bc58bc8bf5dcc",
+    ftAddress: process.env.MOCKFT_CADENCE_ADDRESS ?? "0x4b6bc58bc8bf5dcc",
     ftContractName: "MockFT",
     decimals: 8, // UFix64 internal: 1.0 = 100_000_000
   } satisfies CadenceFTTokenEntry,
@@ -78,7 +97,8 @@ export const SHIELDED_CHECKPOINT_ADDRESS = "0xbF8dbE133FC1319570dBe43E32BFD9a6D6
  * Shared MemoKeyRegistry — v0.8 deployment.
  * All EVM Janus tokens share this registry. One publishMemoKey() call covers all.
  */
-export const MEMO_REGISTRY_ADDRESS = "0x361bD4d037838A3a9c5408AE465d36077800ee6c";
+export const MEMO_REGISTRY_ADDRESS =
+  process.env.MEMO_REGISTRY_ADDRESS ?? "0x361bD4d037838A3a9c5408AE465d36077800ee6c";
 
 /**
  * Pedersen2Gen library address on-chain.
@@ -107,7 +127,8 @@ export const UFIX64_SCALE = 100_000_000n;
 /**
  * Flow EVM testnet RPC.
  */
-export const FLOW_EVM_RPC = "https://testnet.evm.nodes.onflow.org";
+export const FLOW_EVM_RPC =
+  process.env.FLOW_EVM_RPC ?? "https://testnet.evm.nodes.onflow.org";
 
 /**
  * Flow Cadence testnet access node.
