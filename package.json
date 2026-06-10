@@ -58,6 +58,16 @@
       "import": "./dist/cadence/index.js",
       "require": "./dist/cadence/index.cjs",
       "types": "./dist/cadence/index.d.ts"
+    },
+    "./batchClaim": {
+      "import": "./dist/batchClaim/index.js",
+      "require": "./dist/batchClaim/index.cjs",
+      "types": "./dist/batchClaim/index.d.ts"
+    },
+    "./proof/batch-claim": {
+      "import": "./dist/proof/batch-claim.js",
+      "require": "./dist/proof/batch-claim.cjs",
+      "types": "./dist/proof/batch-claim.d.ts"
     }
   },
   "files": [

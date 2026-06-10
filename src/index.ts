@@ -149,6 +149,12 @@ export type { DrainResult, DrainAndDecryptResult } from "./inbox/ShieldedInboxCl
 export { ShieldedCheckpointClient } from "./checkpoint/ShieldedCheckpointClient";
 export type { CheckpointMetadata, RawCheckpoint, UpdateResult } from "./checkpoint/ShieldedCheckpointClient";
 
+// BatchClaimClient (v0.8.1 — batch consolidation of ShieldedInbox notes)
+export { BatchClaimClient } from "./batchClaim/BatchClaimClient";
+export type { BuildAndClaimParams, BuildAndClaimResult } from "./batchClaim/BatchClaimClient";
+export { buildBatchClaimProof } from "./proof/batch-claim";
+export type { BatchClaimInputs, BatchClaimProof, BatchClaimProofOptions } from "./proof/batch-claim";
+
 // Cadence transaction templates (v0.8)
 export { cadenceTx, installInbox, installCheckpoint, installInboxAndCheckpoint, updateCheckpointViaCoa, combinedShieldedTransferWithCheckpoint } from "./cadence/index";
 

@@ -13,6 +13,9 @@ export default defineConfig({
     "inbox/index": "src/inbox/index.ts",
     "checkpoint/index": "src/checkpoint/index.ts",
     "cadence/index": "src/cadence/index.ts",
+    // v0.8.1 modules
+    "batchClaim/index": "src/batchClaim/index.ts",
+    "proof/batch-claim": "src/proof/batch-claim.ts",
   },
   format: ["esm", "cjs"],
   dts: true,
