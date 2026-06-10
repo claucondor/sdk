@@ -17,10 +17,12 @@ import {
   deriveBabyJubKeypairFromBytes,
   FLOW_EVM_RPC,
   TOKEN_REGISTRY,
+} from "../../../src/index";
+import {
   SHIELDED_INBOX_ADDRESS,
   SHIELDED_CHECKPOINT_ADDRESS,
   MEMO_REGISTRY_ADDRESS,
-} from "../../../src/index";
+} from "../../../src/network/contracts";
 import type { BabyJubKeypair } from "../../../src/index";
 
 // ---------------------------------------------------------------------------

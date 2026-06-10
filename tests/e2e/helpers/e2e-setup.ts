@@ -20,11 +20,13 @@ import {
   sdk,
   TOKEN_REGISTRY,
   FLOW_EVM_RPC,
+  deriveBabyJubKeypairFromBytes,
+} from "../../../src/index";
+import {
   SHIELDED_INBOX_ADDRESS,
   SHIELDED_CHECKPOINT_ADDRESS,
   MEMO_REGISTRY_ADDRESS,
-  deriveBabyJubKeypairFromBytes,
-} from "../../../src/index";
+} from "../../../src/network/contracts";
 import type { BabyJubKeypair } from "../../../src/index";
 
 // ---------------------------------------------------------------------------
