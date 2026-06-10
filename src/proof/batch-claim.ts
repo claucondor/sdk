@@ -90,10 +90,18 @@ async function getDefaultCircuitPaths(): Promise<CircuitPaths> {
   if (_defaultPaths) return _defaultPaths;
   const { fileURLToPath } = await import("url");
   const { dirname, resolve } = await import("path");
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  // dist/proof/ → package root is two levels up
-  const PACKAGE_ROOT = resolve(__dirname, "..", "..");
+  const { existsSync } = await import("fs");
+  // Use _modFile (not __filename) so tsup CJS output avoids a TDZ: tsup converts
+  // import.meta.url to a __filename-based expression, which would self-reference
+  // a const that hasn't been initialised yet if the variable is named __filename.
+  const _modFile = fileURLToPath(import.meta.url);
+  let _modDir = dirname(_modFile);
+  // Walk up from the bundle's __dirname until we find package.json — works at any
+  // bundle nesting depth (dist/, dist/proof/, dist/batchClaim/, etc.)
+  for (let _up = 0; _up < 4 && !existsSync(resolve(_modDir, "package.json")); _up++) {
+    _modDir = resolve(_modDir, "..");
+  }
+  const PACKAGE_ROOT = _modDir;
   _defaultPaths = {
     wasm: resolve(
       PACKAGE_ROOT,
