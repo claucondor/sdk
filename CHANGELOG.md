@@ -2,6 +2,26 @@
 
 ---
 
+## 0.8.1-alpha.1 — 2026-06-09
+
+### Added
+
+- **`BatchClaimClient`** (`src/batchClaim/BatchClaimClient.ts`): EVM client for `JanusToken.claimBatch`. Aggregates up to 50 ShieldedInbox notes into the caller's shielded balance via a single Groth16 proof. Exports `claimBatch(publicInputs, proof)` for pre-built proofs and `buildAndClaim(params)` for the full generate+submit flow. Also exposes `getVerifierAddress()` and `getVersion()` view helpers.
+- **`buildBatchClaimProof`** (`src/proof/batch-claim.ts`): TypeScript port of the `proof-inputs.cjs` accumulation strategy. Pads note arrays to N=50, computes C_old/C_new/C_consumed via chained BabyJubJub point addition (NOT scalar sum), runs `groth16.fullProve`, applies Fp2 swap, and returns EVM-ready `uint256[8]` proof + 6-element public inputs.
+- **`batchClaimAndUpdate`** methods on all three token adapters:
+  - `JanusFlowAdapter.batchClaimAndUpdate(params, signer)` → delegates to `BatchClaimClient.buildAndClaim`.
+  - `JanusERC20Adapter.batchClaimAndUpdate(params, signer)` → delegates to `BatchClaimClient.buildAndClaim`.
+  - `JanusFTAdapter.batchClaimAndUpdate(params)` → generates proof off-chain, submits via FCL Cadence tx calling `JanusFT.CommitmentRegistry.claimBatch()` with cross-VM verification.
+- 26 new unit tests (2 new test files) covering: C_old/C_new/C_consumed commitment arithmetic, note padding to N=50, pB Fp2 swap, public signal count validation, claimBatch calldata encoding, input validation, contract method delegation.
+
+### Protocol Notes
+
+- v0.8.1 contracts were upgraded via UUPS (proxies unchanged, impls swapped) — no SDK address changes needed. JanusFlow proxy remains `0xA64340C1d356835A2450306Ffd290Ed52c001Ad3`, JanusERC20 proxy remains `0xFD8F82bE1782AF1F85f4673065e94fb3F8D5387d`.
+- `ConfidentialClaimBatchVerifier` (pot22 ceremony, N=50): `0x2FBf6baef1D70f5A9aFF2602c934Bd62dcf6Df80`.
+- Trust assumption (testnet): inbox notes are NOT marked consumed on-chain after `claimBatch`. Replay is bounded by the C_old state machine — post-claim C_old advances to C_new, invalidating any proof that references the prior C_old. Mainnet hardening requires `NoteCommitmentTracker.sol` (deferred to L6/mainnet prep).
+
+---
+
 ## 0.8.0-alpha.1 — 2026-06-09
 
 **v0.8 protocol rewrite: inbox/checkpoint replace scan, 6-arg shieldedTransfer, schema-agnostic ECIES.**

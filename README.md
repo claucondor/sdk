@@ -1,10 +1,12 @@
 # @claucondor/sdk
 
-Multi-token privacy SDK for Flow. Version: **v0.8.0-alpha.1**.
+Multi-token privacy SDK for Flow. Version: **v0.8.1-alpha.1**.
 
 Send FLOW, MockUSDC, or MockFT (via JanusFT generic Cadence wrapper) shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
 
-**v0.8.0-alpha.1**: Protocol overhaul. `shieldedTransfer` is now 6-arg (sender snapshot removed from calldata). `scan/` replaced by `ShieldedInboxClient` (inbox drain) + `ShieldedCheckpointClient` (state recovery). New `cadence/` module with atomic transfer+checkpoint templates. See CHANGELOG for full details.
+**v0.8.1-alpha.1**: Adds `BatchClaimClient` and `buildBatchClaimProof` for batch consolidation of inbox notes. See CHANGELOG for full details.
+
+**v0.8.0-alpha.1**: Protocol overhaul. `shieldedTransfer` is now 6-arg (sender snapshot removed from calldata). `scan/` replaced by `ShieldedInboxClient` (inbox drain) + `ShieldedCheckpointClient` (state recovery). New `cadence/` module with atomic transfer+checkpoint templates.
 
 ## Install
 
@@ -70,7 +72,7 @@ Testnet (Flow EVM chainId 545 + Flow Cadence testnet). Single source of truth: `
 
 All at `feeBps=10` (0.1%).
 
-### Shared infra (v0.8 testnet)
+### Shared infra (v0.8.1 testnet)
 
 | Component | Address |
 |---|---|
@@ -79,8 +81,21 @@ All at `feeBps=10` (0.1%).
 | `MemoKeyRegistry` (EVM) | `0x361bD4d037838A3a9c5408AE465d36077800ee6c` |
 | `ConfidentialTransferVerifier` | `0x38e69fE7Ba7c2C586d64DFFc14742641A675666c` |
 | `AmountDiscloseVerifier` | `0xf7B634D41259D0613345633eE1CD193A030A6329` |
+| `ConfidentialClaimBatchVerifier` | `0x2FBf6baef1D70f5A9aFF2602c934Bd62dcf6Df80` |
 | Cadence deployer | `0x4b6bc58bc8bf5dcc` |
 | Cadence deployer COA (EVM) | `0x0000000000000000000000020885d7ad3582356a` |
+
+## What's in the SDK
+
+| Module | Export | Description |
+|---|---|---|
+| `src/batchClaim/` | `BatchClaimClient` | Batch consolidation of up to 50 inbox notes via Groth16 proof |
+| `src/proof/` | `buildBatchClaimProof` | ConfidentialClaimBatch proof builder (chained babyAdd accumulation) |
+| `src/inbox/` | `ShieldedInboxClient` | Drain encrypted notes from ShieldedInbox.sol |
+| `src/checkpoint/` | `ShieldedCheckpointClient` | Read/write encrypted balance checkpoint |
+| `src/adapters/` | `JanusFlowAdapter`, `JanusERC20Adapter`, `JanusFTAdapter` | Token adapters: wrap / shieldedTransfer / unwrap / batchClaimAndUpdate |
+| `src/crypto/` | `buildAmountDiscloseProof`, `buildShieldedTransferProof` | Individual proof builders |
+| `src/cadence/` | `cadenceTx.*` | Cadence transaction templates |
 
 ## v0.8 protocol architecture
 
