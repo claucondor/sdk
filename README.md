@@ -204,6 +204,37 @@ const orch = await orchestrateShieldedTransfer({
 - **Note encryption**: BabyJub ECIES + AES-256-GCM
 - **Checkpoint privacy**: read() scoped to msg.sender — blob not exposed to public callers
 
+## Running integration & E2E tests
+
+The SDK ships unit tests by default. Integration and E2E tests against the live testnet v0.8 stack are gated:
+
+```bash
+# Unit only (default)
+npm test
+
+# Integration tests against testnet v0.8 stack
+RUN_INTEGRATION=1 npm run test:integration
+
+# E2E tests using only SDK public API
+RUN_E2E=1 npm run test:e2e
+
+# All tests (unit + integration + e2e)
+RUN_INTEGRATION=1 RUN_E2E=1 npm run test:all
+```
+
+The integration suites use the deployer EOA at `0xFc47B35f79d26A060B652E112c53d7c6057d05FF` as the primary funded account — it funds fresh random EOA wallets used as test senders, avoiding commitment-state conflicts between runs.
+
+Tests cover:
+
+- **ShieldedInboxClient**: `count`, `peek`, `drainBatch`, `drainAndDecrypt` — full wrap → transfer → drain cycle
+- **ShieldedCheckpointClient**: `encryptAndUpdate`, `readAndDecrypt`, `metadata`, cursor rewind, `SnapshotTooLarge` revert path
+- **MemoKeyRegistry** (via `JanusFlowAdapter`): `publishMemoKey`, `getMemoKey`, `rotateMemoKey`
+- **JanusFlowAdapter**: wrap → shieldedTransfer → checkpoint → drainAndDecrypt → unwrap using SDK orchestration layer
+- **JanusERC20Adapter**: mint → approve → wrap → shieldedTransfer → drain → decode → unwrap for MockUSDC
+- **E2E FLOW lifecycle**: `sdk.token('flow').wrap()` → blinding recovery from `WrapWithSnapshot` event → `shieldedTransfer` → inbox drain → `unwrap`
+- **E2E mUSDC lifecycle**: same pattern for ERC20 tokens via `sdk.token('mockusdc')`
+- **E2E multi-token**: one sender holds both FLOW and mUSDC shielded; sends FLOW to Bob, mUSDC to Carol; isolated inboxes verified
+
 ## License
 
 MIT

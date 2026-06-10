@@ -41,6 +41,19 @@
 
 - 72 unit tests across 8 test files (all passing).
 - Covers: fee-math, note-helpers, checkpoint-schema, decrypt-any-note, pi-b-swap, contract addresses, COA registry, Cadence templates.
+- Added comprehensive integration tests against deployed v0.8 testnet stack (32 tests, 5 suites).
+  - `ShieldedInboxClient`: count, peek, drainBatch, drainAndDecrypt — wrap → transfer → drain full cycle.
+  - `ShieldedCheckpointClient`: encryptAndUpdate, readAndDecrypt, metadata, cursor rewind, SnapshotTooLarge revert.
+  - `MemoKeyRegistry`: publishMemoKey, getMemoKey, rotateMemoKey via `JanusFlowAdapter`.
+  - `JanusFlowAdapter`: full wrap → shieldedTransfer → checkpoint → drain → unwrap using SDK orchestration layer.
+  - `JanusERC20Adapter`: mint → approve → wrap → transfer → drain → decode → unwrap for MockUSDC.
+  - Gated by `RUN_INTEGRATION=1` to avoid blocking default `npm test`.
+- Added E2E tests via SDK public API only (16 tests, 3 suites).
+  - `flow-lifecycle`: FLOW wrap → blinding recovery from `WrapWithSnapshot` event → shieldedTransfer → drain → unwrap.
+  - `musdc-lifecycle`: mUSDC mint → approve → wrap → shieldedTransfer → drain → unwrap.
+  - `multi-token`: same sender wraps FLOW + mUSDC; sends FLOW to Bob, mUSDC to Carol; isolated inboxes verified.
+  - Gated by `RUN_E2E=1`.
+- Confirmed compatible with testnet v0.8 stack at Cadence account `0x4b6bc58bc8bf5dcc`.
 
 ---
 
