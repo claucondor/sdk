@@ -34,6 +34,8 @@ import type { CadenceFTTokenEntry } from "../types";
 import { ethers } from "ethers";
 import { FLOW_CADENCE_ACCESS, FLOW_EVM_RPC, MEMO_REGISTRY_ADDRESS, UFIX64_SCALE } from "../network/contracts";
 import { getCoaEvmAddress } from "../network/coa";
+import { buildBatchClaimProof } from "../proof/batch-claim";
+import type { BatchClaimProofOptions } from "../proof/batch-claim";
 import { orchestrateWrap, orchestrateWrapWithPrebuiltProof } from "../orchestration/wrap";
 import { orchestrateShieldedTransfer, orchestrateShieldedTransferWithPrebuiltProof } from "../orchestration/shielded-transfer";
 import { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "../orchestration/unwrap";
@@ -281,6 +283,44 @@ transaction {
 }
 
 /**
+ * v0.8.1 claimBatch: aggregate ShieldedInbox notes into the caller's JanusFT commitment.
+ * Takes pre-computed publicInputs and proof arrays.
+ */
+function buildClaimBatchTx(contractAddr: string): string {
+  return `
+import JanusFT from ${contractAddr}
+import EVM from 0x8c5303eaa26202d6
+
+transaction(
+  account:      Address,
+  publicInputs: [UInt256],
+  proof:        [UInt256]
+) {
+  let registryRef: &JanusFT.CommitmentRegistry
+  let coa: auth(EVM.Call) &EVM.CadenceOwnedAccount
+
+  prepare(signer: auth(BorrowValue) &Account) {
+    self.registryRef = signer.storage.borrow<&JanusFT.CommitmentRegistry>(
+      from: JanusFT.CommitmentRegistryStoragePath
+    ) ?? panic("claim_batch_ft: signer must hold the JanusFT registry")
+    self.coa = signer.storage.borrow<auth(EVM.Call) &EVM.CadenceOwnedAccount>(
+      from: /storage/evm
+    ) ?? panic("claim_batch_ft: no COA at /storage/evm")
+  }
+
+  execute {
+    self.registryRef.claimBatch(
+      account:      account,
+      publicInputs: publicInputs,
+      proof:        proof,
+      coa:          self.coa
+    )
+  }
+}
+`;
+}
+
+/**
  * Publish memoKey to both Cadence storage and EVM MemoKeyRegistry via COA.
  * v0.8: MemoKeyRegistry at 0x361bD4d037838A3a9c5408AE465d36077800ee6c
  */
@@ -337,6 +377,35 @@ export interface FTShieldedTransferViaCoaPrebuiltProof {
   publicInputs: readonly [bigint, bigint, bigint, bigint, bigint, bigint];
   transferBlinding: bigint;
   newBlinding: bigint;
+}
+
+export interface FTBatchClaimParams {
+  /** User's current hidden balance (amount scalar). */
+  oldBalance: bigint;
+  /** Current Pedersen blinding factor. */
+  oldBlinding: bigint;
+  /** Fresh blinding for the post-claim commitment. */
+  newBlinding: bigint;
+  /** Notes to consume from the JanusFT inbox (up to 50). */
+  notesToConsume: Array<{ amount: bigint; blinding: bigint }>;
+  /** Cadence address of the user (owner of CommitmentRegistry). */
+  userCadenceAddr: string;
+  /**
+   * Optional circuit artifact paths.
+   * If omitted, uses the wasm/zkey bundled with the SDK.
+   */
+  circuitOptions?: BatchClaimProofOptions;
+}
+
+export interface FTBatchClaimResult {
+  /** Cadence transaction ID. */
+  txHash: string;
+  /** New on-chain commitment after the claim. */
+  newCommit: { x: bigint; y: bigint };
+  /** New balance (oldBalance + Σ consumed note amounts). */
+  newBalance: bigint;
+  /** Public inputs that were submitted. */
+  publicInputs: [bigint, bigint, bigint, bigint, bigint, bigint];
 }
 
 export interface FTUnwrapViaCoaPrebuiltProofs {
@@ -795,5 +864,53 @@ access(all) fun main(): Address { return ${this.entry.contractName}.feeRecipient
     const result = await decryptSnapshot(blob, ephPub, myMemoPrivKey);
     if (result === null) throw new Error("JanusFTAdapter.decryptSnapshot: decryption failed");
     return result;
+  }
+
+  /**
+   * batchClaimAndUpdate — aggregate ShieldedInbox notes into this user's JanusFT commitment.
+   *
+   * Cadence path (FCL):
+   *   1. Generates a ConfidentialClaimBatch Groth16 proof (N=50) off-chain.
+   *   2. Submits a Cadence tx that calls JanusFT.CommitmentRegistry.claimBatch()
+   *      with the computed publicInputs and proof.
+   *   3. JanusFT calls ConfidentialClaimBatchVerifier via cross-VM.
+   *
+   * @param params.userCadenceAddr  Cadence address of the user (owner of CommitmentRegistry).
+   * @param params.oldBalance       Current hidden balance scalar.
+   * @param params.oldBlinding      Current Pedersen blinding factor.
+   * @param params.newBlinding      Fresh blinding for the post-claim commitment.
+   * @param params.notesToConsume   Up to 50 inbox notes (amount + blinding each).
+   */
+  async batchClaimAndUpdate(params: FTBatchClaimParams): Promise<FTBatchClaimResult> {
+    const fcl = await this._fcl();
+
+    // Generate proof off-chain
+    const { publicInputs, proof, newCommit, newBalance } = await buildBatchClaimProof(
+      {
+        oldBalance: params.oldBalance,
+        oldBlinding: params.oldBlinding,
+        newBlinding: params.newBlinding,
+        notes: params.notesToConsume,
+      },
+      params.circuitOptions
+    );
+
+    const cadence = buildClaimBatchTx(this.entry.cadenceAddress);
+    const txId: string = await fcl.mutate({
+      cadence,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      args: (arg: any, types: any) => [
+        arg(params.userCadenceAddr, types.Address),
+        arg(publicInputs.map((v) => v.toString()), types.Array(types.UInt256)),
+        arg(proof.map((v) => v.toString()), types.Array(types.UInt256)),
+      ],
+      proposer: fcl.authz,
+      payer: fcl.authz,
+      authorizations: [fcl.authz],
+      limit: 9999,
+    });
+    await fcl.tx(txId).onceSealed();
+
+    return { txHash: txId, newCommit, newBalance, publicInputs };
   }
 }

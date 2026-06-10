@@ -41,6 +41,8 @@ import { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "../orche
 import { splitProof } from "../utils/pi-b-swap";
 import { decryptNote } from "../crypto/note-helpers";
 import { decryptSnapshot } from "../crypto/checkpoint-schema";
+import { BatchClaimClient } from "../batchClaim/BatchClaimClient";
+import type { BuildAndClaimParams, BuildAndClaimResult } from "../batchClaim/BatchClaimClient";
 
 // ---------------------------------------------------------------------------
 // Pre-built proof types (for browser callers that generate proofs server-side)
@@ -574,5 +576,27 @@ transaction(calldataHex: String, proxyHex: String) {
     const result = await decryptSnapshot(blob, ephPub, myMemoPrivKey);
     if (result === null) throw new Error("JanusFlowAdapter.decryptSnapshot: decryption failed");
     return result;
+  }
+
+  /**
+   * batchClaimAndUpdate — aggregate ShieldedInbox notes into this user's shielded balance.
+   *
+   * Internally calls BatchClaimClient.buildAndClaim():
+   *   1. Generates a ConfidentialClaimBatch Groth16 proof (N=50).
+   *   2. Submits JanusToken.claimBatch(publicInputs, proof) on-chain.
+   *   3. Returns the confirmed receipt and the new commitment.
+   *
+   * @param params.oldBalance       Current hidden balance scalar.
+   * @param params.oldBlinding      Current Pedersen blinding factor.
+   * @param params.newBlinding      Fresh blinding for the post-claim commitment.
+   * @param params.notesToConsume   Up to 50 inbox notes (amount + blinding each).
+   * @param signer                  EVM signer (msg.sender of claimBatch).
+   */
+  async batchClaimAndUpdate(
+    params: BuildAndClaimParams,
+    signer: EVMSigner
+  ): Promise<BuildAndClaimResult> {
+    const client = new BatchClaimClient(signer, this.address);
+    return client.buildAndClaim(params);
   }
 }
