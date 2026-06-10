@@ -2,6 +2,15 @@
 
 ---
 
+## 0.8.1-alpha.2 — 2026-06-10
+
+### Fixed
+
+- Backported runtime fixes from Phase C testnet: `__filename` TDZ in CJS bundle (`dist/index.cjs`, `dist/batchClaim/index.cjs`), robust `PACKAGE_ROOT` artifact resolution via `package.json` walk-up.
+- Source-level fix in `src/proof/batch-claim.ts`, `src/crypto/shielded-transfer.ts`, `src/crypto/amount-disclose.ts`; tarball now correct on fresh install (no `node_modules` patching needed).
+
+---
+
 ## 0.8.1-alpha.1 — 2026-06-09
 
 ### Added
