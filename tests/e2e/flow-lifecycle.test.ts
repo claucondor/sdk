@@ -64,7 +64,7 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
   let senderBlinding: bigint;
 
   // Small amounts to stay within testnet FLOW budget
-  const WRAP_AMOUNT     = AMOUNTS.POINT1_FLOW;       // 0.1 FLOW (recovered via unwrap)
+  const WRAP_AMOUNT     = 2n * 10n ** 16n;           // 0.02 FLOW (recovered via unwrap)
   const TRANSFER_AMOUNT = 5n * 10n ** 15n;            // 0.005 FLOW
   const MEMO_TEXT       = "e2e-flow-lifecycle-test";
 
@@ -74,7 +74,7 @@ describe("E2E: FLOW full lifecycle via SDK public API", () => {
 
     // Deployer (Alice) funds fresh accounts
     const alice = makeAlice();
-    sender = await createFundedAccount("0.06"); // gas (0.04) + wrap (0.1) recovered via unwrap
+    sender = await createFundedAccount("0.06"); // gas (0.04) + wrap (0.02) recovered via unwrap
     bob    = await createFundedAccount("0.005");
 
     senderJub = await deriveMemoJub(sender.address, "e2e-flow:sender:v1");
