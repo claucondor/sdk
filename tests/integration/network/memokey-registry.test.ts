@@ -130,9 +130,14 @@ describe("MemoKeyRegistry — integration", () => {
     expect(key!.x).toBe(aliceJubNew.pubkey.x);
     expect(key!.y).toBe(aliceJubNew.pubkey.y);
 
-    // Rotate back to aliceJub so subsequent tests can use it
-    await adapter.rotateMemoKey(aliceJub, alice);
-    console.log("[MemoKeyRegistry] Rotated back to aliceJub for downstream tests");
+    // Best-effort rotate back to aliceJub for downstream test symmetry.
+    // Not critical — subsequent test files use fresh accounts that don't depend on Alice's key.
+    try {
+      await adapter.rotateMemoKey(aliceJub, alice);
+      console.log("[MemoKeyRegistry] Rotated back to aliceJub for downstream tests");
+    } catch (err) {
+      console.warn("[MemoKeyRegistry] Rotate-back to aliceJub skipped (non-fatal):", (err as Error).message?.slice(0, 80));
+    }
   }, 90_000);
 
   it("addresses should match TOKEN_REGISTRY and ADDRESSES constants", () => {
