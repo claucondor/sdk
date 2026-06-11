@@ -1,7 +1,7 @@
 /**
  * proof/batch-claim.ts — buildBatchClaimProof
  *
- * Generates a Groth16 proof for the ConfidentialClaimBatch circuit (N=50 notes).
+ * Generates a Groth16 proof for the ConfidentialClaimBatch circuit (N=10 notes).
  *
  * Circuit proves:
  *   C_new = C_old + C_consumed   (on BabyJubJub)
@@ -35,8 +35,8 @@ export interface BatchClaimInputs {
   /** Fresh blinding for the new post-claim commitment. */
   newBlinding: bigint;
   /**
-   * Notes to consume. Up to 50 entries. Excess entries are silently truncated.
-   * Notes with zero amount are allowed (and will be padded if fewer than 50).
+   * Notes to consume. Up to 10 entries. Excess entries are silently truncated.
+   * Notes with zero amount are allowed (and will be padded if fewer than 10).
    */
   notes: Array<{ amount: bigint; blinding: bigint }>;
 }
@@ -119,7 +119,7 @@ async function getDefaultCircuitPaths(): Promise<CircuitPaths> {
 // Padding helper
 // ---------------------------------------------------------------------------
 
-const CIRCUIT_N = 50;
+const CIRCUIT_N = 10;
 
 /**
  * Pad or truncate a note array to exactly CIRCUIT_N elements.
@@ -165,7 +165,7 @@ export async function buildBatchClaimProof(
     zkeyPath = zkeyPath ?? paths.zkey;
   }
 
-  // ── 1. Pad notes to N=50 ────────────────────────────────────────────────
+  // ── 1. Pad notes to N=10 ────────────────────────────────────────────────
   const paddedNotes = padNotes(inputs.notes);
   const amounts = paddedNotes.map((n) => n.amount);
   const blindings = paddedNotes.map((n) => n.blinding);
@@ -214,7 +214,7 @@ export async function buildBatchClaimProof(
   if (publicSignals.length !== 6) {
     throw new Error(
       `buildBatchClaimProof: expected 6 public signals, got ${publicSignals.length}. ` +
-        `Check that the circuit wasm/zkey matches ConfidentialClaimBatch(N=50).`
+        `Check that the circuit wasm/zkey matches ConfidentialClaimBatch(N=10).`
     );
   }
 
