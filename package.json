@@ -1,6 +1,6 @@
 {
   "name": "@claucondor/sdk",
-  "version": "0.8.1-alpha.4",
+  "version": "0.8.1-alpha.5",
   "description": "Multi-token privacy SDK for Flow v0.8 — JanusFlow (native FLOW), JanusERC20 (ERC20), JanusFT (Cadence FT). ShieldedInbox + ShieldedCheckpoint primitives, schema-agnostic ECIES, Pedersen commitments, Groth16 proofs, full wrap/shieldedTransfer/unwrap orchestration.",
   "author": "oydual3 <claucondor@gmail.com>",
   "license": "MIT",
