@@ -77,8 +77,8 @@ export const VERIFIERS = {
   transferVerifier: "0x38e69fE7Ba7c2C586d64DFFc14742641A675666c",
   /** AmountDiscloseAggregateVerifier — v0.8 re-deployed */
   amountDiscloseVerifier: "0xf7B634D41259D0613345633eE1CD193A030A6329",
-  /** ConfidentialClaimBatchVerifier — deployed but @experimental (circuit lacks note commitment tracker) */
-  claimBatchVerifier: "0x2FBf6baef1D70f5A9aFF2602c934Bd62dcf6Df80",
+  /** ConfidentialClaimBatchVerifier — N=10 re-deployed (v0.8.1-alpha.4) */
+  claimBatchVerifier: "0x66f25B8f2e7ABFA97ff6446aEAfE5c5D3b1c8d2f",
 } as const;
 
 /**
