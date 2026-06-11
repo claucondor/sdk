@@ -137,12 +137,17 @@ transaction {
 // ---------------------------------------------------------------------------
 // update_checkpoint_via_coa
 //
-// Call EVM ShieldedCheckpoint.update() via the signer's COA.
+// Call EVM ShieldedCheckpoint.update(address token, bytes, uint256, uint256, uint64)
+// via the signer's COA.
 // Used after a shieldedTransfer (EVM path) to persist the sender's new balance.
-// The checkpointPayload returned by shieldedTransfer() maps directly to the args.
+//
+// v0.8.2 BREAKING CHANGE: token address is now the first argument (multi-token support).
+// The `tokenAddrHex` argument is a Cadence transaction argument (passed via FCL args),
+// so the same template works for any token — no re-compilation needed.
 //
 // Arguments (FCL):
-//   encryptedSnapshot:     [UInt8]
+//   tokenAddrHex:          String  — EVM proxy address of the Janus token (e.g. JanusFlow proxy)
+//   encryptedSnapshotHex:  String  — hex-encoded snapshot bytes (no 0x prefix)
 //   ephPubkeyX:            UInt256
 //   ephPubkeyY:            UInt256
 //   lastConsumedNoteIndex: UInt64
@@ -155,7 +160,8 @@ export function updateCheckpointViaCoa(
 import EVM from 0x8c5303eaa26202d6
 
 transaction(
-  encryptedSnapshot:     [UInt8],
+  tokenAddrHex:          String,
+  encryptedSnapshotHex:  String,
   ephPubkeyX:            UInt256,
   ephPubkeyY:            UInt256,
   lastConsumedNoteIndex: UInt64
@@ -169,16 +175,17 @@ transaction(
 
   execute {
     let checkpointAddr = EVM.addressFromString("${checkpointEvmAddr}")
+    let tokenAddr = EVM.addressFromString(tokenAddrHex)
 
     let calldata = EVM.encodeABIWithSignature(
-      "update(bytes,uint256,uint256,uint64)",
-      [encryptedSnapshot, ephPubkeyX, ephPubkeyY, lastConsumedNoteIndex]
+      "update(address,bytes,uint256,uint256,uint64)",
+      [tokenAddr, EVM.EVMBytes(value: encryptedSnapshotHex.decodeHex()), ephPubkeyX, ephPubkeyY, lastConsumedNoteIndex]
     )
 
     let result = self.coa.call(
       to:       checkpointAddr,
       data:     calldata,
-      gasLimit: 200000,
+      gasLimit: 1500000,
       value:    EVM.Balance(attoflow: 0)
     )
 
@@ -246,7 +253,7 @@ transaction(
 
     let transferCalldata = EVM.encodeABIWithSignature(
       "shieldedTransfer(address,uint256[6],uint256[8],bytes,uint256,uint256)",
-      [to, publicInputs, proof, encryptedNoteTo, ephPubkeyToX, ephPubkeyToY]
+      [to, publicInputs, proof, EVM.EVMBytes(value: encryptedNoteTo), ephPubkeyToX, ephPubkeyToY]
     )
 
     let transferResult = self.coa.call(
@@ -261,18 +268,19 @@ transaction(
       message: "JanusFlow.shieldedTransfer failed: ".concat(transferResult.errorMessage)
     )
 
-    // ── Step 2: ShieldedCheckpoint.update ──────────────────────────────
+    // ── Step 2: ShieldedCheckpoint.update (token = janusFlowAddr) ─────────
+    // v0.8.2: token is the first arg — for shieldedTransfer the token IS the JanusFlow proxy.
     let checkpointAddr = EVM.addressFromString("${checkpointEvmAddr}")
 
     let checkpointCalldata = EVM.encodeABIWithSignature(
-      "update(bytes,uint256,uint256,uint64)",
-      [encryptedSnapshot, ephPubkeyX, ephPubkeyY, lastConsumedNoteIndex]
+      "update(address,bytes,uint256,uint256,uint64)",
+      [janusFlowAddr, EVM.EVMBytes(value: encryptedSnapshot), ephPubkeyX, ephPubkeyY, lastConsumedNoteIndex]
     )
 
     let checkpointResult = self.coa.call(
       to:       checkpointAddr,
       data:     checkpointCalldata,
-      gasLimit: 200000,
+      gasLimit: 1500000,
       value:    EVM.Balance(attoflow: 0)
     )
 

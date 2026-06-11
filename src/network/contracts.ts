@@ -88,10 +88,20 @@ export const VERIFIERS = {
 export const SHIELDED_INBOX_ADDRESS = "0x0C787AAcbA9a116EdA4ec05Be41D8474D470bfC6";
 
 /**
- * ShieldedCheckpoint — per-user encrypted state store for sender balance recovery.
+ * ShieldedCheckpoint — per-user, per-token encrypted state store for sender balance recovery.
  * Immutable contract (no proxy). Senders update their checkpoint after each transfer.
+ * v0.8.2 re-deploy: multi-token support (token address as first arg on all write/read methods).
+ * Deployed: 2026-06-11 (A.4 sprint).
  */
-export const SHIELDED_CHECKPOINT_ADDRESS = "0xbF8dbE133FC1319570dBe43E32BFD9a6D64E1E76";
+export const SHIELDED_CHECKPOINT_ADDRESS = "0x88C9fD443BC15d1Cd24bc724DB6928D3246b2E26";
+
+/**
+ * ARCHIVED — singleton ShieldedCheckpoint from v0.8.0/0.8.1 (single-slot, no token param).
+ * Do NOT use for new writes. Preserved for reference only.
+ * NOT exported from SDK index.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const SHIELDED_CHECKPOINT_ADDRESS_ARCHIVE_SINGLETON = "0xbF8dbE133FC1319570dBe43E32BFD9a6D64E1E76";
 
 /**
  * Shared MemoKeyRegistry — v0.8 deployment.

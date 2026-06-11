@@ -8,6 +8,16 @@
  *   4. Encrypt residual snapshot to sender's memokey.
  *   5. Return all params.
  *
+ * v0.8.2 checkpoint note:
+ *   After the unwrap tx, call ShieldedCheckpoint.update(token, payload, cursor, signer).
+ *   `token` = TOKEN_REGISTRY[tokenId].proxy (e.g. JanusFlow proxy for FLOW).
+ *   Preferred: use cadenceTx.unwrapFlowAtomic(tokenAddrHex) for atomic single-tx unwrap+checkpoint.
+ *
+ * WARNING (MockFT path): Cadence ShieldedCheckpoint upgrade was BLOCKED in v0.8.2.
+ *   MockFT shielded balance is still subject to singleton overwrite limitation on the
+ *   Cadence side. The EVM checkpoint at SHIELDED_CHECKPOINT_ADDRESS works correctly for
+ *   all EVM tokens (JanusFlow, JanusERC20). Cadence FT checkpoint fix is deferred.
+ *
  * Fee model:
  *   - claimedAmount is the FULL debit from the commitment.
  *   - netToRecipient = claimedAmount - fee.

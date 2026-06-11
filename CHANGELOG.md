@@ -2,6 +2,51 @@
 
 ---
 
+## 0.8.1-alpha.6 (2026-06-11) — Multi-token ShieldedCheckpoint + atomic templates moved from frontend
+
+### Breaking Changes
+
+- **`ShieldedCheckpointClient.update()`**: signature changed from `update(payload, cursor, signer)` to `update(token, payload, cursor, signer)`. The `token` arg is the EVM proxy address of the Janus token being checkpointed (e.g. `TOKEN_REGISTRY.flow.proxy` for FLOW). Without it the call will fail.
+- **`ShieldedCheckpointClient.read()`**: was `read(signer)`, now `read(token, signer)`. Returns `null` instead of throwing when no checkpoint exists (`NoCheckpoint` revert is caught).
+- **`ShieldedCheckpointClient.readAndDecrypt()`**: was `readAndDecrypt(signer, memoPrivKey)`, now `readAndDecrypt(token, signer, memoPrivKey)`.
+- **`ShieldedCheckpointClient.metadata()`**: was `metadata(user)`, now `metadata(user, token)`.
+- **`ShieldedCheckpointClient.exists()`**: was `exists(user)`, now `exists(user, token)`.
+- **`ShieldedCheckpointClient.encryptAndUpdate()`**: was `encryptAndUpdate(snapshot, cursor, kp, signer)`, now `encryptAndUpdate(token, snapshot, cursor, kp, signer)`.
+- **`cadenceTx.updateCheckpointViaCoa()`**: ABI changed from `update(bytes,uint256,uint256,uint64)` to `update(address,bytes,uint256,uint256,uint64)`. The Cadence transaction now takes `tokenAddrHex: String` as its first arg.
+- **`cadenceTx.combinedShieldedTransferWithCheckpoint()`**: same ABI change — checkpoint call now includes token (resolved from `janusFlowAddr`). Also applies `EVM.EVMBytes(value:)` fix to `encryptedNoteTo` calldata.
+
+### New Contract Address
+
+- **`SHIELDED_CHECKPOINT_ADDRESS`**: updated to `0x88C9fD443BC15d1Cd24bc724DB6928D3246b2E26` (v0.8.2 multi-token re-deploy, sprint A.4).
+- Old singleton address `0xbF8dbE133FC1319570dBe43E32BFD9a6D64E1E76` preserved as internal `SHIELDED_CHECKPOINT_ADDRESS_ARCHIVE_SINGLETON` (NOT exported).
+
+### Atomic Templates Moved from PrivateTip Frontend
+
+Five Cadence transaction templates moved from `private-tip-v1/web/lib/cadence-tx.ts` into `src/cadence/atomic-transactions.ts`:
+
+- `cadenceTx.wrapFlowAtomic(tokenAddrHex)` — wrap + checkpoint in one tx
+- `cadenceTx.sendTipAtomic(tokenAddrHex)` — shieldedTransfer + checkpoint in one tx
+- `cadenceTx.unwrapFlowAtomic(tokenAddrHex)` — unwrap + checkpoint in one tx
+- `cadenceTx.claimBatchAtomic(tokenAddrHex)` — drainAll + claimBatch + checkpoint in one tx
+- `cadenceTx.atomicUpdateCheckpointViaCoa()` — standalone checkpoint update (atomic variant)
+
+All templates:
+- Use `EVM.EVMBytes(value: ...)` wrapper for `[UInt8] → bytes` calldata (fixes encoding bug hit in PrivateTip frontend).
+- Bake in `SHIELDED_CHECKPOINT_ADDRESS` from SDK constant (auto-updates when SDK is bumped).
+- Take `tokenAddrHex` as a JS function argument to parameterize the checkpoint token slot.
+
+### Orchestration Notes
+
+- `orchestrateWrap`, `orchestrateShieldedTransfer`, `orchestrateUnwrap` are unchanged — they return `checkpointPayload` for callers to persist.
+- Callers must now pass the token address when calling `checkpoint.update(token, payload, cursor, signer)`.
+- Token resolution: `TOKEN_REGISTRY.flow.proxy` for FLOW, `TOKEN_REGISTRY.mockusdc.proxy` for mUSDC.
+
+### MockFT (Cadence FT) Limitation
+
+The Cadence-side `ShieldedCheckpoint` upgrade was blocked in v0.8.2 sprint A.4. MockFT shielded balance is still subject to singleton overwrite on the Cadence side. The EVM checkpoint works correctly for all EVM tokens. Cadence FT checkpoint fix is deferred to a future sprint.
+
+---
+
 ## 0.8.1-alpha.2 — 2026-06-10
 
 ### Fixed

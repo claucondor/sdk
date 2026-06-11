@@ -90,9 +90,19 @@ describe("cadence/transactions", () => {
       expect(tx).toContain(SHIELDED_CHECKPOINT_ADDRESS);
     });
 
-    it("encodes update(bytes,uint256,uint256,uint64) function signature", () => {
+    it("encodes update(address,bytes,uint256,uint256,uint64) function signature (v0.8.2 multi-token)", () => {
       const tx = updateCheckpointViaCoa();
-      expect(tx).toContain("update(bytes,uint256,uint256,uint64)");
+      expect(tx).toContain("update(address,bytes,uint256,uint256,uint64)");
+    });
+
+    it("includes tokenAddrHex Cadence transaction arg", () => {
+      const tx = updateCheckpointViaCoa();
+      expect(tx).toContain("tokenAddrHex");
+    });
+
+    it("wraps snapshot bytes with EVM.EVMBytes(value:)", () => {
+      const tx = updateCheckpointViaCoa();
+      expect(tx).toContain("EVM.EVMBytes(value:");
     });
 
     it("uses /storage/evm for COA borrow path", () => {
@@ -131,9 +141,15 @@ describe("cadence/transactions", () => {
       );
     });
 
-    it("encodes checkpoint update ABI signature", () => {
+    it("encodes checkpoint update ABI signature (v0.8.2 multi-token)", () => {
       const tx = combinedShieldedTransferWithCheckpoint(JANUS_FLOW_PROXY);
-      expect(tx).toContain("update(bytes,uint256,uint256,uint64)");
+      expect(tx).toContain("update(address,bytes,uint256,uint256,uint64)");
+    });
+
+    it("wraps encryptedSnapshot and encryptedNoteTo with EVM.EVMBytes(value:)", () => {
+      const tx = combinedShieldedTransferWithCheckpoint(JANUS_FLOW_PROXY);
+      const evmBytesCount = (tx.match(/EVM\.EVMBytes\(value:/g) ?? []).length;
+      expect(evmBytesCount).toBeGreaterThanOrEqual(1);
     });
 
     it("has two separate EVM COA calls (transfer + checkpoint)", () => {
@@ -152,12 +168,17 @@ describe("cadence/transactions", () => {
   });
 
   describe("cadenceTx namespace bundle", () => {
-    it("exposes all five template functions", () => {
+    it("exposes all original template functions plus atomic templates", () => {
       expect(typeof cadenceTx.installInbox).toBe("function");
       expect(typeof cadenceTx.installCheckpoint).toBe("function");
       expect(typeof cadenceTx.installInboxAndCheckpoint).toBe("function");
       expect(typeof cadenceTx.updateCheckpointViaCoa).toBe("function");
       expect(typeof cadenceTx.combinedShieldedTransferWithCheckpoint).toBe("function");
+      // Atomic templates (moved from PrivateTip frontend in v0.8.2)
+      expect(typeof cadenceTx.wrapFlowAtomic).toBe("function");
+      expect(typeof cadenceTx.sendTipAtomic).toBe("function");
+      expect(typeof cadenceTx.unwrapFlowAtomic).toBe("function");
+      expect(typeof cadenceTx.claimBatchAtomic).toBe("function");
     });
 
     it("namespace functions produce the same output as named exports", () => {

@@ -68,9 +68,11 @@ describe("network/contracts — v0.8 address constants", () => {
     );
   });
 
-  it("SHIELDED_CHECKPOINT_ADDRESS is correct", () => {
+  it("SHIELDED_CHECKPOINT_ADDRESS is correct (v0.8.2 multi-token re-deploy)", () => {
+    // Updated in v0.8.2 sprint A.4 — new multi-token contract
+    // (old singleton 0xbF8dbE133FC1319570dBe43E32BFD9a6D64E1E76 is archived)
     expect(SHIELDED_CHECKPOINT_ADDRESS.toLowerCase()).toBe(
-      "0xbf8dbe133fc1319570dbe43e32bfd9a6d64e1e76",
+      "0x88c9fd443bc15d1cd24bc724db6928d3246b2e26",
     );
   });
 

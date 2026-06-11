@@ -12,6 +12,11 @@
  *   5. Encrypt snapshot {netAmount, blinding, timestampMs} to sender's memokey.
  *   6. Return all params ready for the adapter's wrapWithProof call.
  *
+ * v0.8.2 checkpoint note:
+ *   After the wrap tx, call ShieldedCheckpoint.update(token, payload, cursor, signer).
+ *   `token` = TOKEN_REGISTRY[tokenId].proxy (e.g. JanusFlow proxy for FLOW).
+ *   Preferred: use cadenceTx.wrapFlowAtomic(tokenAddrHex) for atomic single-tx wrap+checkpoint.
+ *
  * CRITICAL: The proof MUST bind to netAmount, not grossAmount.
  * Binding to grossAmount causes a silent verification revert.
  *

@@ -7,9 +7,12 @@
  *
  * The sender's checkpoint payload (encryptedSnapshot + ephKeys) is returned
  * separately in `checkpointPayload` so callers can:
- *   A. Call ShieldedCheckpoint.update() in a separate EVM tx (two txs)
- *   B. Use combined_shielded_transfer_with_checkpoint.cdc for atomic Cadence execution
- *   C. Skip checkpoint update entirely for read-only testing
+ *   A. Call ShieldedCheckpoint.update(token, payload, cursor, signer) in a separate EVM tx.
+ *      `token` = TOKEN_REGISTRY[tokenId].proxy for EVM tokens (JanusFlow, JanusERC20).
+ *      `token` = cadence deployer addr formatted as "0x" + 16-char hex for MockFT path.
+ *      NOTE (v0.8.2): ShieldedCheckpoint.update() now requires `token` as first arg.
+ *   B. Use cadenceTx.sendTipAtomic(tokenAddrHex) for atomic Cadence execution (preferred).
+ *   C. Skip checkpoint update entirely for read-only testing.
  *
  * Sequence:
  *   1. Generate fresh transferBlinding and newBlinding.
