@@ -56,6 +56,13 @@ import {
   sendTipAtomic,
   unwrapFlowAtomic,
   claimBatchAtomic,
+  wrapErc20Atomic,
+  sendTipErc20Atomic,
+  unwrapErc20Atomic,
+  wrapFtAtomic,
+  sendTipFtAtomic,
+  unwrapFtAtomic,
+  claimBatchFtAtomic,
 } from "./atomic-transactions";
 
 // Named exports for destructured imports
@@ -69,6 +76,13 @@ export {
   sendTipAtomic,
   unwrapFlowAtomic,
   claimBatchAtomic,
+  wrapErc20Atomic,
+  sendTipErc20Atomic,
+  unwrapErc20Atomic,
+  wrapFtAtomic,
+  sendTipFtAtomic,
+  unwrapFtAtomic,
+  claimBatchFtAtomic,
 };
 
 /**
@@ -82,10 +96,17 @@ export {
  *   cadenceTx.combinedShieldedTransferWithCheckpoint(janusProxy)
  *
  * Atomic templates (preferred for production — single-tx, no orphaned checkpoint):
- *   cadenceTx.wrapFlowAtomic(tokenAddrHex)          — wrap + checkpoint
- *   cadenceTx.sendTipAtomic(tokenAddrHex)            — shieldedTransfer + checkpoint
- *   cadenceTx.unwrapFlowAtomic(tokenAddrHex)         — unwrap + checkpoint
- *   cadenceTx.claimBatchAtomic(tokenAddrHex)         — drainAll + claimBatch + checkpoint
+ *   cadenceTx.wrapFlowAtomic(tokenAddrHex)                          — wrap + checkpoint (FLOW)
+ *   cadenceTx.sendTipAtomic(tokenAddrHex)                           — shieldedTransfer + checkpoint (EVM, any)
+ *   cadenceTx.unwrapFlowAtomic(tokenAddrHex)                        — unwrap + checkpoint (FLOW)
+ *   cadenceTx.claimBatchAtomic(tokenAddrHex)                        — drainAll + claimBatch + checkpoint (EVM)
+ *   cadenceTx.wrapErc20Atomic(tokenAddrHex)                         — approve + wrap + checkpoint (ERC20)
+ *   cadenceTx.sendTipErc20Atomic(tokenAddrHex)                      — shieldedTransfer + checkpoint (ERC20)
+ *   cadenceTx.unwrapErc20Atomic(tokenAddrHex)                       — unwrap + checkpoint (ERC20)
+ *   cadenceTx.wrapFtAtomic(tokenAddrHex, addr, ft, ftAddr)          — JanusFT wrap + checkpoint (cadence-ft)
+ *   cadenceTx.sendTipFtAtomic(tokenAddrHex, addr)                   — JanusFT transfer + checkpoint (cadence-ft)
+ *   cadenceTx.unwrapFtAtomic(tokenAddrHex, addr, ft, ftAddr)        — JanusFT unwrap + checkpoint (cadence-ft)
+ *   cadenceTx.claimBatchFtAtomic(tokenAddrHex, addr)                — JanusFT claimBatch + checkpoint (cadence-ft)
  */
 export const cadenceTx = {
   installInbox,
@@ -99,4 +120,13 @@ export const cadenceTx = {
   sendTipAtomic,
   unwrapFlowAtomic,
   claimBatchAtomic,
+  // ERC20 atomic templates (v0.8.2 audit additions)
+  wrapErc20Atomic,
+  sendTipErc20Atomic,
+  unwrapErc20Atomic,
+  // cadence-ft atomic templates (v0.8.2 audit additions)
+  wrapFtAtomic,
+  sendTipFtAtomic,
+  unwrapFtAtomic,
+  claimBatchFtAtomic,
 } as const;

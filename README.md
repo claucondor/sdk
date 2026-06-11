@@ -50,7 +50,8 @@ const { txHash, checkpointPayload, newBalance, newBlinding } = await flow.shield
 }, wallet);
 
 // 7. Update your sender checkpoint (persist new balance on-chain)
-await checkpoint.update(checkpointPayload!, 0n, wallet);
+// update(token, payload, cursor, signer) — token is the JanusFlow proxy address
+await checkpoint.update(TOKEN_REGISTRY.flow.proxy, checkpointPayload!, 0n, wallet);
 
 // 8. Bob drains his inbox and decrypts incoming notes
 const inbox = new ShieldedInboxClient();

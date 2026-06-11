@@ -322,7 +322,7 @@ transaction(
 
 /**
  * Publish memoKey to both Cadence storage and EVM MemoKeyRegistry via COA.
- * v0.8: MemoKeyRegistry at 0x361bD4d037838A3a9c5408AE465d36077800ee6c
+ * v0.8: MemoKeyRegistry address sourced from MEMO_REGISTRY_ADDRESS env-overridable constant.
  */
 function buildPublishMemoKeyTx(contractAddr: string): string {
   return `
@@ -337,7 +337,7 @@ transaction(memoPubX: UInt256, memoPubY: UInt256) {
       .borrow<auth(EVM.Call) &EVM.CadenceOwnedAccount>(from: /storage/evm)
       ?? panic("No COA at /storage/evm")
 
-    let memoRegistryAddr = EVM.addressFromString("0x361bD4d037838A3a9c5408AE465d36077800ee6c")
+    let memoRegistryAddr = EVM.addressFromString("${MEMO_REGISTRY_ADDRESS}")
 
     let calldata = EVM.encodeABIWithSignature(
       "publishMemoKey(uint256,uint256)",
