@@ -14,14 +14,6 @@
  *   - EVM.EVMBytes(value: ...) wrapper applied to all [UInt8] → bytes calldata encodings.
  *   - Checkpoint contract address baked from SDK constant (auto-updates when SDK is bumped).
  *
- * IMPORTANT — MockFT (Cadence FT path) caveat:
- *   The on-chain Cadence ShieldedCheckpoint upgrade was BLOCKED in v0.8.2 sprint A.4.
- *   MockFT shielded balance still writes to the old singleton checkpoint on the Cadence side.
- *   The EVM checkpoint path below uses the new multi-token contract and works correctly for
- *   JanusFlow (native FLOW) and JanusERC20 (mUSDC). For MockFT, the checkpoint call will
- *   succeed on-chain (writes to EVM checkpoint with token = mockFT cadence-formatted addr)
- *   but is SUBJECT TO SINGLETON OVERWRITE on the Cadence side until the Cadence upgrade ships.
- *
  * Usage:
  *   import { cadenceTx } from '@claucondor/sdk/cadence';
  *   const tx = cadenceTx.wrapFlowAtomic(TOKEN_REGISTRY.flow.proxy);

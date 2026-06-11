@@ -2,6 +2,19 @@
 
 ---
 
+## 0.8.1-alpha.7 (2026-06-11)
+
+Cadence ShieldedCheckpoint per-token deploy unblocked at 0xd1a02aa46d9151bb; MockFT no longer singleton
+
+### Changes
+
+- `CADENCE_SHIELDED_CHECKPOINT_ADDRESS` constant added (`0xd1a02aa46d9151bb`) — separate faucet account, per-token.
+- `cadence/transactions.ts`: `installCheckpoint` and `installInboxAndCheckpoint` now default to `CADENCE_SHIELDED_CHECKPOINT_ADDRESS` for the Cadence ShieldedCheckpoint import.
+- `cadence/atomic-transactions.ts`: removed stale singleton-blocked caveat comment.
+- `orchestration/unwrap.ts`: removed singleton overwrite warning comment.
+
+---
+
 ## 0.8.1-alpha.6 (2026-06-11) — Multi-token ShieldedCheckpoint + atomic templates moved from frontend
 
 ### Breaking Changes

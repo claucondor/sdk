@@ -16,6 +16,7 @@ import {
 } from "../../../src/cadence/index";
 import {
   CADENCE_DEPLOYER_ADDRESS,
+  CADENCE_SHIELDED_CHECKPOINT_ADDRESS,
   SHIELDED_CHECKPOINT_ADDRESS,
 } from "../../../src/network/contracts";
 
@@ -50,7 +51,7 @@ describe("cadence/transactions", () => {
   describe("installCheckpoint", () => {
     it("imports ShieldedCheckpoint from the default cadence deployer", () => {
       const tx = installCheckpoint();
-      expect(tx).toContain(`import ShieldedCheckpoint from ${CADENCE_DEPLOYER_ADDRESS}`);
+      expect(tx).toContain(`import ShieldedCheckpoint from ${CADENCE_SHIELDED_CHECKPOINT_ADDRESS}`);
     });
 
     it("saves to /storage/shieldedCheckpoint", () => {

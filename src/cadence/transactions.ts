@@ -20,6 +20,7 @@
 
 import {
   CADENCE_DEPLOYER_ADDRESS,
+  CADENCE_SHIELDED_CHECKPOINT_ADDRESS,
   SHIELDED_CHECKPOINT_ADDRESS,
   SHIELDED_INBOX_ADDRESS,
 } from "../network/contracts";
@@ -89,7 +90,7 @@ transaction {
 // Arguments: none
 // ---------------------------------------------------------------------------
 
-export function installCheckpoint(cadenceDeployer = CADENCE_DEPLOYER_ADDRESS): string {
+export function installCheckpoint(cadenceDeployer = CADENCE_SHIELDED_CHECKPOINT_ADDRESS): string {
   return `
 import ShieldedCheckpoint from ${cadenceDeployer}
 
@@ -303,10 +304,13 @@ transaction(
 // Arguments: none
 // ---------------------------------------------------------------------------
 
-export function installInboxAndCheckpoint(cadenceDeployer = CADENCE_DEPLOYER_ADDRESS): string {
+export function installInboxAndCheckpoint(
+  cadenceDeployer = CADENCE_DEPLOYER_ADDRESS,
+  cadenceCheckpointDeployer = CADENCE_SHIELDED_CHECKPOINT_ADDRESS,
+): string {
   return `
 import ShieldedInbox from ${cadenceDeployer}
-import ShieldedCheckpoint from ${cadenceDeployer}
+import ShieldedCheckpoint from ${cadenceCheckpointDeployer}
 
 transaction {
   prepare(

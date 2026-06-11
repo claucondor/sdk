@@ -150,6 +150,9 @@ export const FLOW_CADENCE_ACCESS = "https://rest-testnet.onflow.org";
  */
 export const CADENCE_DEPLOYER_ADDRESS = "0x4b6bc58bc8bf5dcc";
 
+/** Cadence ShieldedCheckpoint — deployed to separate faucet account (per-token, not singleton) */
+export const CADENCE_SHIELDED_CHECKPOINT_ADDRESS = process.env.CADENCE_SHIELDED_CHECKPOINT_ADDRESS ?? "0xd1a02aa46d9151bb";
+
 /**
  * COA EVM address of the Cadence deployer (owner of all EVM proxies).
  * Admin calls to JanusFlow/JanusERC20 must go through this COA via Cadence.
