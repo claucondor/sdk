@@ -16,6 +16,8 @@ export default defineConfig({
     // v0.8.1 modules
     "batchClaim/index": "src/batchClaim/index.ts",
     "proof/batch-claim": "src/proof/batch-claim.ts",
+    // v0.8-workarounds-promoted: browser-only session helpers
+    "session/index": "src/session/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,

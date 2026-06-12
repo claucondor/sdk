@@ -68,6 +68,11 @@
       "import": "./dist/proof/batch-claim.js",
       "require": "./dist/proof/batch-claim.cjs",
       "types": "./dist/proof/batch-claim.d.ts"
+    },
+    "./session": {
+      "import": "./dist/session/index.js",
+      "require": "./dist/session/index.cjs",
+      "types": "./dist/session/index.d.ts"
     }
   },
   "files": [

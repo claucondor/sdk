@@ -81,8 +81,8 @@ export const sdk = {
 // ---------------------------------------------------------------------------
 
 // Token registry + addresses
-export { TOKEN_REGISTRY, VERIFIERS, FLOW_EVM_RPC, FLOW_CADENCE_ACCESS } from "./network/contracts";
-export type { TokenId } from "./network/contracts";
+export { TOKEN_REGISTRY, VERIFIERS, FLOW_EVM_RPC, FLOW_CADENCE_ACCESS, TOKEN_RECIPIENT_TYPES } from "./network/contracts";
+export type { TokenId, TokenRecipientTypes } from "./network/contracts";
 
 // Adapter interface + classes
 export type { JanusTokenAdapter, EVMSigner } from "./adapters/JanusTokenAdapter";
@@ -131,6 +131,46 @@ export { applyPiBSwap, evmProofToUint256Array } from "./utils/pi-b-swap";
 // JSON serialization helper — use with JSON.stringify to handle BigInt fields
 export { bigintReplacer } from "./utils/format";
 
+// ── Promoted workarounds (v08-workarounds-promoted) ──────────────────────────
+
+// W3 — UFix64 conversion helpers
+// rawToUFix64(amount, decimals) is the generic form; flowToUFix64 wraps it for FLOW (18 dec)
+// toUFix64 is @deprecated alias for flowToUFix64
+export { rawToUFix64, flowToUFix64, toUFix64, FLOW_SCALE } from "./utils/ufix64";
+
+// W2 — Cadence FT address → 20-byte EVM token identifier
+export { cadenceAddrToEvmToken } from "./utils/evm-helpers";
+
+// W7 — ABI fixed-array calldata pre-encoder (avoids Cadence [UInt256]→uint256[N] ABI mismatch)
+export { encodeEVMCalldata } from "./utils/evm-helpers";
+
+// W1 — Identity-point detection for admin-reset commitment slots
+export { isFreshSlotCommit } from "./utils/fresh-slot";
+
+// W5 — Accumulate pending note deltas onto stale checkpoint for correct C_old in claim proofs
+export { computeActualCOld } from "./utils/fresh-slot";
+
+// W8 — JanusFT pB pre-swap: converts EVM-ordered ProofUint256 to Cadence natural-order pA/pB/pC
+// JanusFT.wrapWithProof does an internal Fp2-swap; this un-swaps first so the net result is correct.
+export { buildFtWrapProofArgs } from "./adapters/janus-ft";
+
+// ── Session helpers (browser-only) ───────────────────────────────────────────
+// W4 — MemoKeySession: session-scoped BabyJub privkey cache (sessionStorage)
+// W6 — SentMemoStore:  sender-side plaintext memo mirror (localStorage)
+// These are re-exported here for discoverability; the dedicated subpath
+// @claucondor/sdk/session is the preferred import for apps that tree-shake.
+export {
+  MemoKeySession,
+  getCachedMemoPrivkey,
+  cacheMemoPrivkey,
+  clearMemoPrivkeyCache,
+  SentMemoStore,
+  saveSentMemo,
+  findSentMemo,
+  clearSentMemos,
+} from "./session/index";
+export type { SentMemoEntry } from "./session/SentMemoStore";
+
 // Network helpers
 export { createEvmProvider, createEvmWallet, configureFCL, NETWORK_CONFIG } from "./network/flow-client";
 export type { FlowNetwork } from "./network/flow-client";
@@ -146,6 +186,10 @@ export type { UnwrapOrchestrateInput, UnwrapOrchestrateResult } from "./orchestr
 // Inbox + Checkpoint clients (v0.8 — replace scan/)
 export { ShieldedInboxClient } from "./inbox/ShieldedInboxClient";
 export type { DrainResult, DrainAndDecryptResult } from "./inbox/ShieldedInboxClient";
+
+// Cadence inbox reader (v0.8.2 — JanusFT/MockFT notes stored in Cadence ShieldedInbox)
+export { getCadenceInboxNotes } from "./inbox/CadenceInboxClient";
+export type { CadenceInboxNote } from "./inbox/CadenceInboxClient";
 export { ShieldedCheckpointClient } from "./checkpoint/ShieldedCheckpointClient";
 export type { CheckpointMetadata, RawCheckpoint, UpdateResult } from "./checkpoint/ShieldedCheckpointClient";
 
@@ -179,3 +223,15 @@ export {
   getCoaBalanceWei,
   getFlowVaultBalanceWei,
 } from "./network";
+
+// Portfolio view helper (v0.8.2 — multi-token drift detector)
+export { getPortfolioView } from "./portfolio/getPortfolioView";
+export type {
+  PortfolioView,
+  TokenPortfolioView,
+  GetPortfolioViewOpts,
+} from "./portfolio/getPortfolioView";
+
+// Identity helpers (v0.8.2 — cross-VM recipient resolution)
+export { resolveRecipient } from "./identity/resolveRecipient";
+export type { ResolvedRecipient, ResolveRecipientOpts } from "./identity/resolveRecipient";

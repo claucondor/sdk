@@ -56,6 +56,8 @@ import { decryptSnapshot } from "../crypto/checkpoint-schema";
  *
  * Natural order for Cadence:
  *   pB = [[proof[3], proof[2]], [proof[5], proof[4]]]
+ *
+ * @internal — use the exported `buildFtWrapProofArgs` instead.
  */
 function splitProofForCadence(proof: ProofUint256 | readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]): {
   pA: [bigint, bigint];
@@ -70,6 +72,41 @@ function splitProofForCadence(proof: ProofUint256 | readonly [bigint, bigint, bi
     ],
     pC: [proof[6], proof[7]],
   };
+}
+
+/**
+ * Convert a ProofUint256 (snarkjs EVM-ordered proof) to the pA/pB/pC split
+ * required by JanusFT.wrapWithProof (Cadence natural order with pB un-swapped).
+ *
+ * WHY: JanusFT.wrapWithProof applies an internal Fp2-swap on pB. If the caller
+ * passes the SDK's standard EVM-ordered ProofUint256 directly, the contract's
+ * swap cancels the SDK's swap → verifier receives wrong pB order → proof fails.
+ * Pre-swapping here (un-swapping back to natural order) makes the contract's
+ * internal swap produce the correct EVM order that the verifier expects.
+ *
+ * Verified on-chain: tx 2114e5717640e8b4 (Flow testnet) SEALED with this ordering.
+ *
+ * This function is the canonical location of the pi_b double-swap fix — callers
+ * should NOT manually re-implement the swap inline in their own code.
+ *
+ * @param proof  ProofUint256 from `buildAmountDiscloseProof` or similar SDK builders.
+ * @returns      { pA, pB, pC } ready to pass as FCL args to JanusFT Cadence transactions.
+ *
+ * @example
+ *   const { pA, pB, pC } = buildFtWrapProofArgs(proofResult.proof);
+ *   // Then in FCL mutate args:
+ *   arg(pA.map(v => v.toString()), t.Array(t.UInt256)),
+ *   arg(pB.map(row => row.map(v => v.toString())), t.Array(t.Array(t.UInt256))),
+ *   arg(pC.map(v => v.toString()), t.Array(t.UInt256)),
+ */
+export function buildFtWrapProofArgs(
+  proof: ProofUint256 | readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint],
+): {
+  pA: [bigint, bigint];
+  pB: [[bigint, bigint], [bigint, bigint]];
+  pC: [bigint, bigint];
+} {
+  return splitProofForCadence(proof);
 }
 
 /** Convert bigint raw amount (10^8 units) to UFix64 string "N.XXXXXXXX" */
