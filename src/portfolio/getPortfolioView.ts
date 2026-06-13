@@ -21,6 +21,9 @@ import { getCadenceInboxNotes } from "../inbox/CadenceInboxClient";
 // Public types
 // ---------------------------------------------------------------------------
 
+/** All possible checkpoint health states. */
+export type CheckpointHealth = "coherent" | "stale" | "corrupted" | "not_initialized" | "unknown";
+
 export interface TokenPortfolioView {
   /** "flow" | "mockusdc" | "mockft" */
   tokenId: string;
@@ -86,7 +89,7 @@ export interface TokenPortfolioView {
    *                  (old BatchClaimCTA bug). Admin reset required on testnet.
    *   "unknown"    — health check failed (RPC error, etc.). Treat as stale.
    */
-  checkpointHealth: "coherent" | "stale" | "corrupted" | "unknown";
+  checkpointHealth: "coherent" | "stale" | "corrupted" | "not_initialized" | "unknown";
   /**
    * Which operations the frontend should allow for this token right now.
    *
@@ -270,6 +273,7 @@ export async function getPortfolioView(
     // Cursor: notes at absoluteIndex < lastConsumedNoteIndex have been logically
     // consumed into the shielded checkpoint and must NOT be counted as pending again.
     let lastConsumedNoteIndex = 0n;
+    let isNoCheckpointSlot = false;
 
     try {
       const readCalldata = CHECKPOINT_ABI.encodeFunctionData("read", [token.address]);
@@ -300,9 +304,19 @@ export async function getPortfolioView(
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      // NoCheckpoint revert or not-yet-created — not a bug, just no checkpoint
-      if (!msg.includes("NoCheckpoint") && !msg.includes("0x9e87fac8")) {
+      // Detect NoCheckpoint custom error (selector 0x8f562fb9 = keccak256("NoCheckpoint(address,address)")[:4])
+      // Also handle older selector 0x9e87fac8 and explicit name match.
+      const isNoCheckpointRevert =
+        msg.includes("NoCheckpoint") ||
+        msg.includes("0x8f562fb9") ||
+        msg.includes("0x9e87fac8");
+      if (!isNoCheckpointRevert) {
         decryptErrors.push(`checkpoint:read_error:${msg.slice(0, 100)}`);
+      }
+      // Track NoCheckpoint for health override below.
+      // isNoCheckpointSlot is declared outside this try/catch — see below.
+      if (isNoCheckpointRevert) {
+        isNoCheckpointSlot = true;
       }
       // shielded stays 0n; lastConsumedNoteIndex stays 0n (all notes visible)
     }
@@ -456,6 +470,17 @@ export async function getPortfolioView(
     // Best effort: pending notes mean checkpoint is at minimum stale.
     if (isCadenceFt) {
       checkpointHealth = pendingCount > 0 ? "stale" : "coherent";
+    }
+
+    // not_initialized override: ShieldedCheckpoint.read() reverted with NoCheckpoint.
+    // The slot has never been written — this is NOT corruption, it's a fresh wallet
+    // that needs to run Step 3 (initializeShieldedSlots) or do a first wrap.
+    // wrap: safe (wrapFlowAtomic/wrapErc20Atomic auto-initializes via update())
+    // send/unwrap: unsafe (no old balance/blinding state to use in ZK proof)
+    // claim: safe (starts from zero state; update() creates the slot atomically)
+    if (isNoCheckpointSlot && !isCadenceFt) {
+      checkpointHealth = "not_initialized";
+      safeOpsAvailable = { wrap: true, send: false, claim: true, unwrap: false };
     }
 
     // Determine source-of-truth for this token:

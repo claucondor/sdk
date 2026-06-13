@@ -63,6 +63,7 @@ import {
   sendTipFtAtomic,
   unwrapFtAtomic,
   claimBatchFtAtomic,
+  initializeShieldedSlots,
 } from "./atomic-transactions";
 
 // Named exports for destructured imports
@@ -83,6 +84,7 @@ export {
   sendTipFtAtomic,
   unwrapFtAtomic,
   claimBatchFtAtomic,
+  initializeShieldedSlots,
 };
 
 /**
@@ -107,6 +109,7 @@ export {
  *   cadenceTx.sendTipFtAtomic(tokenAddrHex, addr)                   — JanusFT transfer + checkpoint (cadence-ft)
  *   cadenceTx.unwrapFtAtomic(tokenAddrHex, addr, ft, ftAddr)        — JanusFT unwrap + checkpoint (cadence-ft)
  *   cadenceTx.claimBatchFtAtomic(tokenAddrHex, addr)                — JanusFT claimBatch + checkpoint (cadence-ft)
+ *   cadenceTx.initializeShieldedSlots()                              — Step 3: initialize empty FLOW+mUSDC checkpoint slots
  */
 export const cadenceTx = {
   installInbox,
@@ -129,4 +132,6 @@ export const cadenceTx = {
   sendTipFtAtomic,
   unwrapFtAtomic,
   claimBatchFtAtomic,
+  // Step 3 initialization — creates empty checkpoint slots for FLOW + mUSDC
+  initializeShieldedSlots,
 } as const;

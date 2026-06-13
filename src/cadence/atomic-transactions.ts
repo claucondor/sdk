@@ -28,6 +28,7 @@
 import {
   SHIELDED_CHECKPOINT_ADDRESS,
   SHIELDED_INBOX_ADDRESS,
+  TOKEN_REGISTRY,
 } from "../network/contracts";
 
 // EVM system contract address on Flow testnet (stable — not configurable)
@@ -330,16 +331,23 @@ transaction(
 // ---------------------------------------------------------------------------
 // claimBatchAtomic
 //
-// Atomic batch-claim: drainAll (non-fatal) + JanusToken.claimBatch +
-// ShieldedCheckpoint.update in a single FCL transaction.
-// Replaces the 3-sequential-tx pattern for inbox draining.
+// Atomic batch-claim: JanusToken.claimBatch + ShieldedCheckpoint.update in a
+// single FCL transaction.
+//
+// NOTE: drainAll() was intentionally removed (v0.8.3 fix).
+// ShieldedInbox is SHARED across all tokens. Calling drainAll() before a
+// single-token claim permanently deletes inbox notes belonging to OTHER tokens,
+// making those notes unclaimable.  The lastConsumedNoteIndex cursor in
+// ShieldedCheckpoint is the correct mechanism for preventing re-claims; there
+// is no semantic requirement to delete inbox storage before claimBatch.
 //
 // @param tokenAddrHex  EVM proxy address of the Janus token.
 //
 // Arguments (FCL):
-//   publicInputs:         [UInt256] — claimBatch public inputs (6 elements)
-//   proof:                [UInt256] — claimBatch proof (8 elements)
-//   encryptedSnapshotHex: String    — new consolidated checkpoint ciphertext
+//   claimCalldataHex:     String — ABI-encoded claimBatch calldata, pre-encoded
+//                                  by client with ethers.js to avoid [UInt256]→uint256[N]
+//                                  dynamic-array ABI mismatch. No 0x prefix.
+//   encryptedSnapshotHex: String — new consolidated checkpoint ciphertext
 //   ephPubkeyX:           UInt256
 //   ephPubkeyY:           UInt256
 //   lastConsumedNoteIndex UInt64
@@ -353,8 +361,7 @@ export function claimBatchAtomic(
 import EVM from ${EVM_SYSTEM_CONTRACT}
 
 transaction(
-  publicInputs: [UInt256],
-  proof: [UInt256],
+  claimCalldataHex: String,
   encryptedSnapshotHex: String,
   ephPubkeyX: UInt256,
   ephPubkeyY: UInt256,
@@ -368,25 +375,15 @@ transaction(
   }
 
   execute {
-    // 1. drainAll from ShieldedInbox (non-fatal — inbox may already be empty)
-    let inboxAddr = EVM.addressFromString("${SHIELDED_INBOX_ADDRESS}")
-    let drainCalldata = EVM.encodeABIWithSignature("drainAll()", [])
-    let _ = self.coa.call(
-      to: inboxAddr,
-      data: drainCalldata,
-      gasLimit: 400000,
-      value: EVM.Balance(attoflow: 0)
-    )
-
-    // 2. JanusToken.claimBatch (assert success)
+    // 1. JanusToken.claimBatch — use pre-encoded calldata to avoid [UInt256]→uint256[N] mismatch.
+    // drainAll() is NOT called here: the shared inbox contains notes for ALL tokens and
+    // drainAll would permanently delete notes belonging to other tokens before they are claimed.
+    // The lastConsumedNoteIndex cursor in ShieldedCheckpoint prevents re-claiming without
+    // requiring inbox storage to be deleted.
     let janusAddr = EVM.addressFromString("${tokenAddrHex}")
-    let claimCalldata = EVM.encodeABIWithSignature(
-      "claimBatch(uint256[6],uint256[8])",
-      [publicInputs, proof]
-    )
     let claimResult = self.coa.call(
       to: janusAddr,
-      data: claimCalldata,
+      data: claimCalldataHex.decodeHex(),
       gasLimit: 600000,
       value: EVM.Balance(attoflow: 0)
     )
@@ -395,7 +392,7 @@ transaction(
       message: "JanusToken.claimBatch failed: ".concat(claimResult.errorMessage)
     )
 
-    // 3. ShieldedCheckpoint.update (assert success)
+    // 2. ShieldedCheckpoint.update (assert success)
     let cpCalldata = EVM.encodeABIWithSignature(
       "update(address,bytes,uint256,uint256,uint64)",
       [EVM.addressFromString("${tokenAddrHex}"), EVM.EVMBytes(value: encryptedSnapshotHex.decodeHex()), ephPubkeyX, ephPubkeyY, lastConsumedNoteIndex]
@@ -1047,3 +1044,81 @@ transaction(
 `;
 }
 
+// ---------------------------------------------------------------------------
+// initializeShieldedSlots
+//
+// Initializes empty ShieldedCheckpoint slots for FLOW and mUSDC in a single
+// Cadence transaction. Called as Step 3 after account activation (Step 2).
+//
+// ShieldedCheckpoint.update() is permissionless — msg.sender writes their own
+// slot. Passing encryptedSnapshot=bytes(""), ephPubkeyX=0, ephPubkeyY=0,
+// lastConsumedNoteIndex=0 creates a fresh zero-state checkpoint that:
+//   - prevents the NoCheckpoint revert on subsequent reads
+//   - is semantically equivalent to balance=0 (coherent empty state)
+//
+// No FCL args needed — all values are baked in (both token addresses are
+// SDK constants; all numeric args are zero).
+//
+// Returns { cadence, args } — the args function returns [] (no runtime args).
+// ---------------------------------------------------------------------------
+export function initializeShieldedSlots(
+  checkpointAddr = SHIELDED_CHECKPOINT_ADDRESS,
+): { cadence: string; args: (arg: unknown, t: unknown) => unknown[] } {
+  // Import the two EVM token addresses from contracts.ts
+  const flowProxy = TOKEN_REGISTRY.flow.proxy;
+  const musdcProxy = TOKEN_REGISTRY.mockusdc.proxy;
+
+  const cadence = `
+import EVM from ${EVM_SYSTEM_CONTRACT}
+
+transaction {
+  let coa: auth(EVM.Call) &EVM.CadenceOwnedAccount
+
+  prepare(signer: auth(BorrowValue) &Account) {
+    self.coa = signer.storage.borrow<auth(EVM.Call) &EVM.CadenceOwnedAccount>(from: /storage/evm)
+      ?? panic("initialize_shielded_slots: no COA at /storage/evm — run setup_coa first")
+  }
+
+  execute {
+    let cpAddr = EVM.addressFromString("${checkpointAddr}")
+
+    // Initialize FLOW checkpoint slot (empty state, balance=0)
+    let flowCalldata = EVM.encodeABIWithSignature(
+      "update(address,bytes,uint256,uint256,uint64)",
+      [EVM.addressFromString("${flowProxy}"), EVM.EVMBytes(value: "".decodeHex()), UInt256(0), UInt256(0), UInt64(0)]
+    )
+    let flowResult = self.coa.call(
+      to: cpAddr,
+      data: flowCalldata,
+      gasLimit: 300000,
+      value: EVM.Balance(attoflow: 0)
+    )
+    assert(
+      flowResult.status == EVM.Status.successful,
+      message: "ShieldedCheckpoint.update(FLOW) failed: ".concat(flowResult.errorMessage)
+    )
+
+    // Initialize mUSDC checkpoint slot (empty state, balance=0)
+    let musdcCalldata = EVM.encodeABIWithSignature(
+      "update(address,bytes,uint256,uint256,uint64)",
+      [EVM.addressFromString("${musdcProxy}"), EVM.EVMBytes(value: "".decodeHex()), UInt256(0), UInt256(0), UInt64(0)]
+    )
+    let musdcResult = self.coa.call(
+      to: cpAddr,
+      data: musdcCalldata,
+      gasLimit: 300000,
+      value: EVM.Balance(attoflow: 0)
+    )
+    assert(
+      musdcResult.status == EVM.Status.successful,
+      message: "ShieldedCheckpoint.update(mUSDC) failed: ".concat(musdcResult.errorMessage)
+    )
+  }
+}
+`;
+
+  return {
+    cadence,
+    args: (_arg: unknown, _t: unknown) => [],
+  };
+}
