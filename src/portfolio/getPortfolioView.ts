@@ -13,6 +13,7 @@
 import { ethers } from "ethers";
 import { decryptSnapshot } from "../crypto/checkpoint-schema";
 import { decryptNote } from "../crypto/note-helpers";
+import { computeCommitment } from "../primitives/pedersen";
 import { FLOW_EVM_RPC, FLOW_CADENCE_ACCESS, CADENCE_DEPLOYER_ADDRESS } from "../network/contracts";
 import { getCadenceInboxNotes } from "../inbox/CadenceInboxClient";
 
@@ -73,6 +74,31 @@ export interface TokenPortfolioView {
    *     JanusFT-side commitment.
    */
   freshSlot: boolean;
+  /**
+   * Checkpoint health status for this token.
+   *
+   *   "coherent"   — computed Pedersen(cpBalance + Σpending, cpBlinding + Σpending_blinds)
+   *                  matches the on-chain commitment. All ops are safe.
+   *   "stale"      — pending notes exist that haven't been absorbed into the checkpoint.
+   *                  send/unwrap will absorb them automatically (cursor fix). Claim is needed
+   *                  only if the user wants the pending amounts reflected in shieldedBalance.
+   *   "corrupted"  — commitment mismatch even with pendingCount=0. Blinding stored incorrectly
+   *                  (old BatchClaimCTA bug). Admin reset required on testnet.
+   *   "unknown"    — health check failed (RPC error, etc.). Treat as stale.
+   */
+  checkpointHealth: "coherent" | "stale" | "corrupted" | "unknown";
+  /**
+   * Which operations the frontend should allow for this token right now.
+   *
+   * These are conservative: an op flagged false WILL fail on-chain if attempted.
+   * An op flagged true may still fail for other reasons (balance, gas, etc.).
+   */
+  safeOpsAvailable: {
+    wrap:   boolean;
+    send:   boolean;
+    claim:  boolean;
+    unwrap: boolean;
+  };
 }
 
 export interface PortfolioView {
@@ -92,8 +118,13 @@ export interface GetPortfolioViewOpts {
   /** ShieldedInbox EVM contract address. If omitted, same as checkpointAddr is NOT assumed —
    *  callers MUST pass it explicitly because the two contracts have different ABIs. */
   inboxAddr: string;
-  /** Tokens to query: id (stable label) + address (EVM proxy / 20-byte padded Cadence addr). */
-  tokens: Array<{ id: string; address: string }>;
+  /**
+   * Tokens to query: id (stable label) + address (EVM proxy / 20-byte padded Cadence addr).
+   * Optionally supply janusTokenAddr (the canonical JanusToken / JanusERC20 contract that
+   * holds the on-chain commitment slot) so that getPortfolioView can compute checkpointHealth
+   * via a live Pedersen comparison instead of falling back to the stale/heuristic path.
+   */
+  tokens: Array<{ id: string; address: string; janusTokenAddr?: string }>;
   /** BabyJub memo private key for ECIES decryption. */
   memoPrivkey: bigint;
   /**
@@ -131,6 +162,12 @@ const INBOX_ABI = new ethers.Interface([
   "function count(address user) view returns (uint256)",
   "function peek(address user, uint256 offset, uint256 limit) view returns (tuple(bytes ciphertext, uint256 ephPubkeyX, uint256 ephPubkeyY, address depositor, uint64 blockNumber)[] notes)",
 ]);
+
+const JANUS_ABI = new ethers.Interface([
+  "function commitments(address user) view returns (uint256 x, uint256 y)",
+]);
+
+const BABYJUB_SUBORDER = 2736030358979909402780800718157159386076813972158567259200215660948447373041n;
 
 // ---------------------------------------------------------------------------
 // Main function
@@ -228,6 +265,7 @@ export async function getPortfolioView(
 
     // ── 2a. Checkpoint read ───────────────────────────────────────────────
     let shielded = 0n;
+    let cpBlinding = 0n;
     let checkpointVersion = 0n;
     // Cursor: notes at absoluteIndex < lastConsumedNoteIndex have been logically
     // consumed into the shielded checkpoint and must NOT be counted as pending again.
@@ -253,6 +291,7 @@ export async function getPortfolioView(
           const snap = await decryptSnapshot(encSnap, { x: ephX, y: ephY }, opts.memoPrivkey);
           if (snap) {
             shielded = snap.balance;
+            cpBlinding = snap.blinding;
           } else {
             decryptErrors.push(`checkpoint:decrypt_failed:token=${token.address}`);
           }
@@ -271,6 +310,7 @@ export async function getPortfolioView(
     // ── 2b. Inbox notes for this token ────────────────────────────────────
     const pendingNotes: TokenPortfolioView["pendingNotes"] = [];
     let pending = 0n;
+    let sumPendingBlinds = 0n;
 
     // Determine if this is a Cadence FT token (e.g. MockFT) before inbox reads.
     // Heuristic: padded 8-byte Cadence address (top 12 bytes == 0, lower 8 bytes = Cadence addr).
@@ -296,6 +336,7 @@ export async function getPortfolioView(
             opts.memoPrivkey,
           );
           pending += content.amount;
+          sumPendingBlinds = (sumPendingBlinds + content.blinding) % BABYJUB_SUBORDER;
           pendingNotes.push({
             amount: content.amount,
             blinding: content.blinding,
@@ -353,6 +394,70 @@ export async function getPortfolioView(
 
     const pendingCount = pendingNotes.length;
 
+    // ── 2c. Checkpoint health + safeOpsAvailable ──────────────────────────
+    // "coherent"  — Pedersen(shielded+pending, cpBlinding+sumPendingBlinds) == on-chain
+    // "stale"     — pendingCount>0 and no deeper corruption detected
+    // "corrupted" — pendingCount==0 and commitment still mismatches (blinding bug)
+    // "unknown"   — cadence-ft OR RPC error during check
+    let checkpointHealth: TokenPortfolioView["checkpointHealth"] = "unknown";
+    let safeOpsAvailable: TokenPortfolioView["safeOpsAvailable"] = {
+      wrap: true, send: true, claim: true, unwrap: true,
+    };
+
+    if (!isCadenceFt && token.janusTokenAddr) {
+      try {
+        const totalBalance  = shielded + pending;
+        const totalBlinding = (cpBlinding + sumPendingBlinds) % BABYJUB_SUBORDER;
+        const computed      = await computeCommitment(totalBalance, totalBlinding);
+
+        const cmCalldata = JANUS_ABI.encodeFunctionData("commitments", [coa]);
+        const cmRaw      = await provider.call({ to: token.janusTokenAddr, data: cmCalldata });
+        const [cx, cy]   = JANUS_ABI.decodeFunctionResult("commitments", cmRaw);
+        const onChain    = { x: BigInt(cx), y: BigInt(cy) };
+
+        // Identity point (x=0, y=1) means slot never written or admin-reset.
+        const isIdentity = onChain.x === 0n && onChain.y === 1n;
+
+        if (isIdentity && totalBalance === 0n) {
+          // Fresh uninitialized slot — coherent by definition.
+          checkpointHealth = "coherent";
+        } else if (computed.x === onChain.x && computed.y === onChain.y) {
+          checkpointHealth = pendingCount > 0 ? "stale" : "coherent";
+        } else if (pendingCount > 0) {
+          // Mismatch but there are pending notes — likely just stale cursor.
+          // send/unwrap absorb pending automatically (cursor fix), claim fixes it too.
+          checkpointHealth = "stale";
+        } else {
+          // pendingCount == 0 and still mismatched — blinding corruption.
+          checkpointHealth = "corrupted";
+          safeOpsAvailable = { wrap: true, send: false, claim: false, unwrap: false };
+        }
+      } catch {
+        // RPC failure — fall through to heuristic below
+        checkpointHealth = "unknown";
+      }
+    }
+
+    // Heuristic fallback when janusTokenAddr not provided or cadence-ft:
+    if (checkpointHealth === "unknown" && !isCadenceFt) {
+      // Can't verify against on-chain commitment without janusTokenAddr.
+      // Best-effort: if there are pending notes, we know it's at least "stale".
+      // If no pending notes, it *may* be coherent or corrupted — we can't tell.
+      if (pendingCount > 0) {
+        checkpointHealth = "stale";
+      } else if (checkpointVersion === 0n || (shielded === 0n && decryptErrors.length === 0)) {
+        // No checkpoint and no pending notes — coherent (nothing to corrupt).
+        checkpointHealth = "coherent";
+      }
+      // else: remains "unknown"
+    }
+
+    // Cadence-ft heuristic: commitment is Cadence-based (can't Pedersen-check via EVM).
+    // Best effort: pending notes mean checkpoint is at minimum stale.
+    if (isCadenceFt) {
+      checkpointHealth = pendingCount > 0 ? "stale" : "coherent";
+    }
+
     // Determine source-of-truth for this token:
     // Cadence FT tokens (e.g. MockFT) store commitments in Cadence — everything else is EVM.
     // isCadenceFt is already computed above (before inbox read).
@@ -379,6 +484,8 @@ export async function getPortfolioView(
       claimedCursor: lastConsumedNoteIndex,
       sourceOfTruth,
       freshSlot,
+      checkpointHealth,
+      safeOpsAvailable,
     };
   }
 
