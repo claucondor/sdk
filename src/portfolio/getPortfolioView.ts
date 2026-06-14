@@ -429,8 +429,10 @@ export async function getPortfolioView(
         const [cx, cy]   = JANUS_ABI.decodeFunctionResult("commitments", cmRaw);
         const onChain    = { x: BigInt(cx), y: BigInt(cy) };
 
-        // Identity point (x=0, y=1) means slot never written or admin-reset.
-        const isIdentity = onChain.x === 0n && onChain.y === 1n;
+        // Treat both (0,0) [uninitialized storage] and (0,1) [explicit identity] as fresh.
+        // JanusToken._effectiveCommitment converts (0,0)→(0,1) internally; the public
+        // commitments() getter returns storage raw, which is (0,0) for never-written slots.
+        const isIdentity = onChain.x === 0n && (onChain.y === 0n || onChain.y === 1n);
 
         if (isIdentity && totalBalance === 0n) {
           // Fresh uninitialized slot — coherent by definition.
