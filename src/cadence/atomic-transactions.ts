@@ -1122,3 +1122,62 @@ transaction {
     args: (_arg: unknown, _t: unknown) => [],
   };
 }
+
+// ---------------------------------------------------------------------------
+// reinstallMockFTVault
+//
+// Reinstalls the MockFT vault with capabilities typed as concrete MockFT.Vault
+// (not the generic FungibleToken.Receiver interface). Users with outdated vaults
+// (capability typed as &{FungibleToken.Receiver}) must run this to receive
+// v0.8 MockFT tokens correctly.
+//
+// Safety:
+//   - Archives any existing vault to /storage/_archive_mockFTVault_pre_v08
+//     to preserve balance if a second archive already exists, destroys the old vault.
+//   - Unpublishes old capabilities before re-publishing concrete-typed ones.
+//
+// No FCL args needed — all values are hardcoded (MockFT address is static).
+// Returns { cadence, args } — args function returns [] (no runtime args).
+// ---------------------------------------------------------------------------
+export function reinstallMockFTVault(): {
+  cadence: string;
+  args: (arg: unknown, t: unknown) => unknown[];
+} {
+  const cadence = `
+import MockFT from 0x4b6bc58bc8bf5dcc
+import FungibleToken from 0x9a0766d93b6608b7
+
+transaction {
+  prepare(signer: auth(BorrowValue, SaveValue, LoadValue, IssueStorageCapabilityController, PublishCapability, UnpublishCapability) &Account) {
+
+    // 1. Archive old vault if it exists (preserve any balance)
+    if let old <- signer.storage.load<@AnyResource>(from: /storage/mockFTVault) {
+      if signer.storage.type(at: /storage/_archive_mockFTVault_pre_v08) == nil {
+        signer.storage.save(<- old, to: /storage/_archive_mockFTVault_pre_v08)
+      } else {
+        destroy old
+      }
+    }
+
+    // 2. Unpublish old capabilities
+    signer.capabilities.unpublish(/public/mockFTReceiver)
+    signer.capabilities.unpublish(/public/mockFTBalance)
+
+    // 3. Create + save v0.8 vault
+    let v <- MockFT.createEmptyVault(vaultType: Type<@MockFT.Vault>())
+    signer.storage.save(<- v, to: /storage/mockFTVault)
+
+    // 4. Publish capabilities typed as concrete MockFT.Vault (not interface)
+    let recvCap = signer.capabilities.storage.issue<&MockFT.Vault>(/storage/mockFTVault)
+    signer.capabilities.publish(recvCap, at: /public/mockFTReceiver)
+    let balCap = signer.capabilities.storage.issue<&MockFT.Vault>(/storage/mockFTVault)
+    signer.capabilities.publish(balCap, at: /public/mockFTBalance)
+  }
+}
+`;
+
+  return {
+    cadence,
+    args: (_arg: unknown, _t: unknown) => [],
+  };
+}

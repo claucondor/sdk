@@ -235,3 +235,28 @@ export type {
 // Identity helpers (v0.8.2 — cross-VM recipient resolution)
 export { resolveRecipient } from "./identity/resolveRecipient";
 export type { ResolvedRecipient, ResolveRecipientOpts } from "./identity/resolveRecipient";
+
+// Safety guards (v0.8.2 — pre-flight commitment coherence checks)
+// Use assertCheckpointMatchesCommit for hard pre-flight (throws on divergence).
+// Use isOpSafeNow for soft gating (returns OpSafetyResult, never throws).
+// Use safeBuild* wrappers to gate specific op types before proof build.
+export {
+  assertCheckpointMatchesCommit,
+  CheckpointDivergenceError,
+  isOpSafeNow,
+  safeBuildWrapProof,
+  safeBuildSendProof,
+  safeBuildClaimProof,
+  safeBuildUnwrapProof,
+} from "./safety/index";
+export type {
+  AssertCheckpointOpts,
+  OpType,
+  SuggestedAction,
+  OpSafetyResult,
+  SafeProofOpts,
+} from "./safety/index";
+
+// MockFT vault version detection + reinstall tx (v08-workarounds-promoted)
+export { checkMockFTVaultVersion } from "./cadence/mockft-vault";
+export { reinstallMockFTVault } from "./cadence/atomic-transactions";

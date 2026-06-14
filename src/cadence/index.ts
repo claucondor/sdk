@@ -64,7 +64,10 @@ import {
   unwrapFtAtomic,
   claimBatchFtAtomic,
   initializeShieldedSlots,
+  reinstallMockFTVault,
 } from "./atomic-transactions";
+
+import { checkMockFTVaultVersion } from "./mockft-vault";
 
 // Named exports for destructured imports
 export {
@@ -85,6 +88,8 @@ export {
   unwrapFtAtomic,
   claimBatchFtAtomic,
   initializeShieldedSlots,
+  reinstallMockFTVault,
+  checkMockFTVaultVersion,
 };
 
 /**
@@ -134,4 +139,6 @@ export const cadenceTx = {
   claimBatchFtAtomic,
   // Step 3 initialization — creates empty checkpoint slots for FLOW + mUSDC
   initializeShieldedSlots,
+  // MockFT vault reinstall (v08-workarounds-promoted)
+  reinstallMockFTVault,
 } as const;
