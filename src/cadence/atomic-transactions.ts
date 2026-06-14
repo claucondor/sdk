@@ -1181,3 +1181,106 @@ transaction {
     args: (_arg: unknown, _t: unknown) => [],
   };
 }
+
+// ---------------------------------------------------------------------------
+// reinstallAllJanusResources
+//
+// Atomic reinstall of all three Janus Cadence resources in a single tx:
+//   1. MockFT vault (concrete-typed capabilities for v0.8)
+//   2. JanusFT CommitmentRegistry (fresh, correct underlying vault type)
+//   3. JanusFlow MemoKey (repopulated from BabyJub pubkey args)
+//
+// Each phase is gated by a Bool arg so callers can reinstall only the
+// resources that are outdated/missing.
+//
+// Safety: existing resources are archived to /storage/_archive_*_pre_v08
+// (archived once; second run destroys the old archived copy if it exists).
+//
+// Factory function names verified against on-chain contracts:
+//   JanusFT.createRegistry(vault:)  — @4b6bc58bc8bf5dcc
+//   JanusFlow.createMemoKey(pubkeyX:pubkeyY:)  — @5dcbeb41055ec57e
+//
+// Returns { cadence, args } — the front-end provides its own inline FCL args
+// to fcl.mutate; args here is a no-op placeholder for type consistency.
+// ---------------------------------------------------------------------------
+export function reinstallAllJanusResources(): {
+  cadence: string;
+  args: (arg: unknown, t: unknown) => unknown[];
+} {
+  const cadence = `
+import MockFT from 0x4b6bc58bc8bf5dcc
+import JanusFT from 0x4b6bc58bc8bf5dcc
+import JanusFlow from 0x5dcbeb41055ec57e
+import FungibleToken from 0x9a0766d93b6608b7
+
+transaction(
+  memoPubkeyX: UInt256,
+  memoPubkeyY: UInt256,
+  doMockFT: Bool,
+  doRegistry: Bool,
+  doMemoKey: Bool,
+) {
+  prepare(signer: auth(BorrowValue, SaveValue, LoadValue, IssueStorageCapabilityController, PublishCapability, UnpublishCapability) &Account) {
+
+    // 1. MockFT vault reinstall — concrete-typed capabilities (v0.8)
+    if doMockFT {
+      if let old <- signer.storage.load<@AnyResource>(from: /storage/mockFTVault) {
+        if signer.storage.type(at: /storage/_archive_mockFTVault_pre_v08) == nil {
+          signer.storage.save(<- old, to: /storage/_archive_mockFTVault_pre_v08)
+        } else {
+          destroy old
+        }
+      }
+      signer.capabilities.unpublish(/public/mockFTReceiver)
+      signer.capabilities.unpublish(/public/mockFTBalance)
+      let v <- MockFT.createEmptyVault(vaultType: Type<@MockFT.Vault>())
+      signer.storage.save(<- v, to: /storage/mockFTVault)
+      let recvCap = signer.capabilities.storage.issue<&MockFT.Vault>(/storage/mockFTVault)
+      signer.capabilities.publish(recvCap, at: /public/mockFTReceiver)
+      let balCap = signer.capabilities.storage.issue<&MockFT.Vault>(/storage/mockFTVault)
+      signer.capabilities.publish(balCap, at: /public/mockFTBalance)
+    }
+
+    // 2. JanusFT CommitmentRegistry reinstall — fresh registry with empty MockFT vault
+    if doRegistry {
+      let archivePath: StoragePath = /storage/_archive_janusFTRegistry_pre_v08
+      if let old <- signer.storage.load<@AnyResource>(from: JanusFT.CommitmentRegistryStoragePath) {
+        if signer.storage.type(at: archivePath) == nil {
+          signer.storage.save(<- old, to: archivePath)
+        } else {
+          destroy old
+        }
+      }
+      let reg <- JanusFT.createRegistry(
+        vault: <- MockFT.createEmptyVault(vaultType: Type<@MockFT.Vault>())
+      )
+      signer.storage.save(<- reg, to: JanusFT.CommitmentRegistryStoragePath)
+    }
+
+    // 3. JanusFlow MemoKey reinstall — recreate with current BabyJub pubkey args
+    if doMemoKey {
+      let storagePath = JanusFlow.memoKeyStoragePath()
+      let publicPath  = JanusFlow.memoKeyPublicPath()
+      let archivePath: StoragePath = /storage/_archive_openjanusMemoKey_pre_v08
+      if let old <- signer.storage.load<@AnyResource>(from: storagePath) {
+        if signer.storage.type(at: archivePath) == nil {
+          signer.storage.save(<- old, to: archivePath)
+        } else {
+          destroy old
+        }
+      }
+      signer.capabilities.unpublish(publicPath)
+      let mk <- JanusFlow.createMemoKey(pubkeyX: memoPubkeyX, pubkeyY: memoPubkeyY)
+      signer.storage.save(<- mk, to: storagePath)
+      let cap = signer.capabilities.storage.issue<&{JanusFlow.MemoKeyPublic}>(storagePath)
+      signer.capabilities.publish(cap, at: publicPath)
+    }
+  }
+}
+`;
+
+  return {
+    cadence,
+    args: (_arg: unknown, _t: unknown) => [],
+  };
+}

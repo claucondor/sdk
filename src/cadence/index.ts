@@ -65,9 +65,15 @@ import {
   claimBatchFtAtomic,
   initializeShieldedSlots,
   reinstallMockFTVault,
+  reinstallAllJanusResources,
 } from "./atomic-transactions";
 
 import { checkMockFTVaultVersion } from "./mockft-vault";
+import {
+  checkJanusResourcesStatus,
+  type ResourcesStatus,
+  type ResourceStatus,
+} from "./resource-check";
 
 // Named exports for destructured imports
 export {
@@ -89,8 +95,11 @@ export {
   claimBatchFtAtomic,
   initializeShieldedSlots,
   reinstallMockFTVault,
+  reinstallAllJanusResources,
   checkMockFTVaultVersion,
+  checkJanusResourcesStatus,
 };
+export type { ResourcesStatus, ResourceStatus };
 
 /**
  * Namespace bundle — access all templates via `cadenceTx.templateName()`.
@@ -141,4 +150,6 @@ export const cadenceTx = {
   initializeShieldedSlots,
   // MockFT vault reinstall (v08-workarounds-promoted)
   reinstallMockFTVault,
+  // General Janus resources reinstall: registry + memokey + mockft in one tx
+  reinstallAllJanusResources,
 } as const;

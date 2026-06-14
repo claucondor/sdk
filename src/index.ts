@@ -259,4 +259,8 @@ export type {
 
 // MockFT vault version detection + reinstall tx (v08-workarounds-promoted)
 export { checkMockFTVaultVersion } from "./cadence/mockft-vault";
-export { reinstallMockFTVault } from "./cadence/atomic-transactions";
+export { reinstallMockFTVault, reinstallAllJanusResources } from "./cadence/atomic-transactions";
+
+// Janus resources status check + general reinstall (resource-check)
+export { checkJanusResourcesStatus } from "./cadence/resource-check";
+export type { ResourcesStatus, ResourceStatus } from "./cadence/resource-check";
