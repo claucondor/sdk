@@ -285,7 +285,7 @@ describe("buildBatchClaimProof (mocked snarkjs)", () => {
     ).rejects.toThrow(/expected 6 public signals/);
   });
 
-  it("accepts empty notes array (pads to 50 zeros)", async () => {
+  it("accepts empty notes array (pads to 10 zeros — circuit N=10)", async () => {
     const { buildBatchClaimProof } = await import("../../../src/proof/batch-claim");
     const snarkjs = await import("snarkjs");
 
@@ -301,12 +301,12 @@ describe("buildBatchClaimProof (mocked snarkjs)", () => {
 
     const call = vi.mocked(snarkjs.groth16.fullProve).mock.calls[0];
     const circuitInput = call[0] as Record<string, unknown>;
-    // amounts and blindings should be 50 elements of "0"
-    expect((circuitInput.amounts as string[]).length).toBe(50);
+    // amounts and blindings should be 10 elements of "0" (circuit N=10 since pot22 ceremony)
+    expect((circuitInput.amounts as string[]).length).toBe(10);
     expect((circuitInput.blindings as string[]).every((v: string) => v === "0")).toBe(true);
   });
 
-  it("truncates notes to 50 when more are supplied", async () => {
+  it("truncates notes to 10 when more are supplied — circuit N=10", async () => {
     const { buildBatchClaimProof } = await import("../../../src/proof/batch-claim");
     const snarkjs = await import("snarkjs");
 
@@ -327,6 +327,6 @@ describe("buildBatchClaimProof (mocked snarkjs)", () => {
 
     const call = vi.mocked(snarkjs.groth16.fullProve).mock.calls[0];
     const circuitInput = call[0] as Record<string, unknown>;
-    expect((circuitInput.amounts as string[]).length).toBe(50);
+    expect((circuitInput.amounts as string[]).length).toBe(10);
   });
 });

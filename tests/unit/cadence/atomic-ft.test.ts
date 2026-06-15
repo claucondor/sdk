@@ -317,8 +317,11 @@ describe("unwrapFtAtomic structure", () => {
 // ---------------------------------------------------------------------------
 
 describe("claimBatchFtAtomic structure", () => {
-  it("calls registryRef.claimBatch in execute block", () => {
-    expect(claimBatchFtAtomic(FT_TOKEN_ID, JANUS_FT_ADDR)).toContain("self.registryRef.claimBatch(");
+  it("calls JanusFT.claimBatch in execute block (contract-level fn, not resource method)", () => {
+    // claimBatch is a contract-level function on JanusFT, not a method on the
+    // user's CommitmentRegistry resource. The signer must still hold the
+    // registry (asserted in prepare), but the call goes through the contract.
+    expect(claimBatchFtAtomic(FT_TOKEN_ID, JANUS_FT_ADDR)).toContain("JanusFT.claimBatch(");
   });
 
   it("does NOT call drainAll (FT uses Cadence registry, not EVM ShieldedInbox drainAll)", () => {

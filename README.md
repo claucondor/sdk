@@ -1,12 +1,14 @@
 # @claucondor/sdk
 
-Multi-token privacy SDK for Flow. Version: **v0.8.1-alpha.1**.
+Multi-token privacy SDK for Flow. Version: **v0.8.2**.
 
 Send FLOW, MockUSDC, or MockFT (via JanusFT generic Cadence wrapper) shielded — amounts hidden on-chain via Pedersen commitments and Groth16 proofs. No cleartext amount on calldata, events, or storage.
 
-**v0.8.1-alpha.1**: Adds `BatchClaimClient` and `buildBatchClaimProof` for batch consolidation of inbox notes. See CHANGELOG for full details.
+**v0.8.2**: per-token ShieldedCheckpoint live (3 instances), batchClaim N=10 (pot22 ceremony), 3-layer push-model defense (UI/SDK/contract), cadence-ft safety guards, `getPortfolioView` per-token, atomic ERC20+FT wrap/send/unwrap templates, fresh-slot detection accepts both `(0,0)` and `(0,1)`, `claimBatch` is now contract-level on `JanusFT`, `cadenceAddrToEvmToken` padding helper, and 8 production workarounds promoted from the front into the SDK surface.
 
-**v0.8.0-alpha.1**: Protocol overhaul. `shieldedTransfer` is now 6-arg (sender snapshot removed from calldata). `scan/` replaced by `ShieldedInboxClient` (inbox drain) + `ShieldedCheckpointClient` (state recovery). New `cadence/` module with atomic transfer+checkpoint templates.
+**v0.8.1**: Adds `BatchClaimClient` and `buildBatchClaimProof` for batch consolidation of inbox notes.
+
+**v0.8.0**: Protocol overhaul. `shieldedTransfer` is now 6-arg (sender snapshot removed from calldata). `scan/` replaced by `ShieldedInboxClient` (inbox drain) + `ShieldedCheckpointClient` (state recovery). New `cadence/` module with atomic transfer+checkpoint templates.
 
 ## Install
 

@@ -209,21 +209,32 @@ describe("sendTipAtomic structure", () => {
 });
 
 describe("claimBatchAtomic structure", () => {
-  it("calls drainAll on ShieldedInbox first", () => {
+  it("does NOT call drainAll (per-token claim; shared inbox preserved for other tokens)", () => {
     const tx = claimBatchAtomic(FLOW_PROXY);
-    expect(tx).toContain(SHIELDED_INBOX_ADDRESS);
-    expect(tx).toContain("drainAll()");
+    // drainAll was removed in v0.8.2: the shared ShieldedInbox contains notes
+    // for ALL tokens. Calling drainAll() would permanently delete notes
+    // belonging to other tokens before they get a chance to be claimed.
+    // Replay protection is provided by lastConsumedNoteIndex on the checkpoint.
+    // Strip Cadence line comments before asserting — the source comment also
+    // mentions drainAll() to explain why it isn't called.
+    const codeOnly = tx
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//"))
+      .join("\n");
+    expect(codeOnly).not.toContain("drainAll()");
   });
 
-  it("drainAll is non-fatal (result discarded)", () => {
+  it("uses pre-encoded claim calldata (claimCalldataHex) from SDK", () => {
     const tx = claimBatchAtomic(FLOW_PROXY);
-    // Drain result is discarded with `let _ =`
-    expect(tx).toContain("let _ = self.coa.call");
+    // Calldata is built off-chain (SDK side) and passed as a hex string arg
+    // to avoid the Cadence [UInt256] → Solidity uint256[N] encoding mismatch.
+    expect(tx).toContain("claimCalldataHex");
+    expect(tx).toContain("claimCalldataHex.decodeHex()");
   });
 
-  it("encodes claimBatch(uint256[6],uint256[8]) ABI", () => {
+  it("encodes ShieldedCheckpoint.update(address,bytes,uint256,uint256,uint64) ABI", () => {
     const tx = claimBatchAtomic(FLOW_PROXY);
-    expect(tx).toContain("claimBatch(uint256[6],uint256[8])");
+    expect(tx).toContain("update(address,bytes,uint256,uint256,uint64)");
   });
 
   it("asserts success for claimBatch and checkpoint (2 assertions)", () => {

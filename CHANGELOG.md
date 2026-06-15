@@ -2,6 +2,49 @@
 
 ---
 
+## 0.8.2 (2026-06-15)
+
+Production release of the v0.8.x line — all alpha learnings consolidated. First public-facing demo on testnet using this SDK is live at https://privatetip.vercel.app.
+
+### Added
+
+- `getPortfolioView(userAddress, coaAddress, token, ...)` — per-token shielded state + pending inbox + checkpoint health in a single call.
+- `initializeShieldedSlots` atomic Cadence template — bootstraps all per-token shielded slots in one transaction.
+- `reinstallAllJanusResources` — single atomic transaction to (re)install `JanusFT.CommitmentRegistry`, `MemoKey`, and `MockFT` vault under the signer.
+- `reinstallMockFTVault` — versioned MockFT vault reinstall (used by `/faucet` Reinstall button).
+- `claimBatchFtAtomic` Cadence template — atomic combined `claimBatch` + checkpoint update for cadence-ft path.
+- `CadenceInboxClient` exported — Cadence-side `ShieldedInbox` reader (mirrors the EVM client surface for MockFT).
+- `TOKEN_RECIPIENT_TYPES` + recipient address kind helpers — clarifies which addresses each token accepts.
+- Identity helpers (`isIdentityCommit`, `isFreshSlotCommit`) — accept both `(0,0)` raw storage and `(0,1)` reset-marker as fresh.
+- `cadenceAddrToEvmToken(cadenceAddr)` — pads a Cadence address (8 bytes) into an EVM token key (32 bytes) for checkpoint lookups.
+- `safeBuildClaimProof` and `safeBuildTransferProof` — cadence-aware preflight guards that skip EVM commit checks for cadence-ft tokens.
+- Cadence inbox cursor filtering — pending notes filtered by `lastConsumedNoteIndex` (matches contract replay-protection via `C_old`).
+- 8 workarounds promoted from `private-tip-v1` into the SDK surface (resource-check, anyOutdated logic, MockFT version detect, etc.).
+
+### Fixed
+
+- `claimBatch` on `JanusFT` is now correctly invoked as a contract-level function, not a registry resource method.
+- Cadence `ShieldedCheckpoint` per-token deploy unblocked at `0xd1a02aa46d9151bb` (no longer singleton).
+- `anyOutdated` resource health treats `"missing"` as `needs-install` (not silently ignored).
+- `resource-check` uses `account.storage.type(at: path)` directly instead of inferring from MockFT vault type.
+- Portfolio `(0,0)` storage now treated as identity for `JanusToken` raw storage cases.
+- Cadence-ft portfolio path now respects checkpoint health for the stale badge.
+- Atomic templates for ERC20+FT wrap/send/unwrap unblock the multi-token path.
+- `MemoKeyRegistry` env var fix in CI / smoke harness.
+
+### Changed
+
+- Protocol-level reads now per-token: `ShieldedCheckpointClient.read(token, signer)`, `.metadata(user, token)`, `.update(token, payload, cursor, signer)`.
+- Addresses table updated to the v0.8.2 testnet deployment (Cadence ShieldedCheckpoint at `0xd1a02aa46d9151bb`; per-token EVM checkpoint per `TOKEN_REGISTRY` entry).
+
+### Notes
+
+- Tested end-to-end on Flow EVM testnet (chainId 545) with three wallets across all three token paths (FLOW, mUSDC, MockFT).
+- ElGamal package in `@openjanus/primitives` is preserved as historical only — v0.8 stack uses Pedersen + Groth16 exclusively.
+- Mainnet hardening checklist tracked separately (push→pull model, `adminResetSlot` removal, `forceUnwrap` self-recovery, OFAC hook).
+
+---
+
 ## 0.8.1-alpha.7 (2026-06-11)
 
 Cadence ShieldedCheckpoint per-token deploy unblocked at 0xd1a02aa46d9151bb; MockFT no longer singleton
