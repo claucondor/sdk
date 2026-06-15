@@ -19,7 +19,9 @@ export {
   CADENCE_DEPLOYER_ADDRESS,
   CADENCE_SHIELDED_CHECKPOINT_ADDRESS,
   COA_DEPLOYER_EVM_ADDRESS,
+  TOKEN_RECIPIENT_TYPES,
 } from "./contracts";
+export type { TokenRecipientTypes } from "./contracts";
 
 export {
   KNOWN_COAS,

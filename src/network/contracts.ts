@@ -124,6 +124,27 @@ export const PEDERSEN_2GEN_LIBRARY = "0x5EdF7473b1007b4855127bC40fcc89eCDD7fB561
 export const LEGACY_V071_JANUSFLOW_PROXY = "0x9A83732417947Ef9b7AEa64bF807a345267c2FdA";
 
 /**
+ * TOKEN_RECIPIENT_TYPES — allowed recipient address format per token.
+ *
+ * Drives front-end validation and error messaging.
+ *
+ * | Token   | Allowed types        | Rationale                              |
+ * |---------|----------------------|----------------------------------------|
+ * | flow    | cadence + evm        | ShieldedCheckpoint is EVM; both resolve |
+ * | mockusdc| evm only             | ERC20 — recipient must have an EVM COA |
+ * | mockft  | cadence only         | JanusFT.shieldedTransfer takes Cadence addr |
+ *
+ * The SDK resolves Cadence→COA internally for memokey lookup in all cases.
+ */
+export const TOKEN_RECIPIENT_TYPES = {
+  flow:     ["cadence", "evm"] as const,
+  mockusdc: ["evm"]            as const,
+  mockft:   ["cadence"]        as const,
+} as const;
+
+export type TokenRecipientTypes = typeof TOKEN_RECIPIENT_TYPES;
+
+/**
  * Fee rate used by all v0.8 deployed contracts.
  * 10 bps = 0.1%.
  */

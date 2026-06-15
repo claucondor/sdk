@@ -15,3 +15,6 @@
 
 export { ShieldedInboxClient } from "./ShieldedInboxClient";
 export type { DrainResult, DrainAndDecryptResult, CheckpointMetadata } from "./ShieldedInboxClient";
+
+export { getCadenceInboxNotes } from "./CadenceInboxClient";
+export type { CadenceInboxNote } from "./CadenceInboxClient";
