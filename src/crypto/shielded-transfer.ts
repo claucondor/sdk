@@ -23,7 +23,7 @@ import { applyPiBSwap, evmProofToUint256Array } from "../utils/pi-b-swap.js";
 import { computeCommitment } from "../primitives/pedersen.js";
 import type { Point } from "../types/commitment.js";
 import type { SnarkJSProof, ProofUint256 } from "../types/proof.js";
-import { SUBORDER } from "@openjanus/commitment";
+import { SUBORDER } from "../primitives/commitment/index.js";
 
 // ---------------------------------------------------------------------------
 // Bundled circuit artifact paths — RESOLVED LAZILY (Node-only)

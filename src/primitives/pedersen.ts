@@ -29,7 +29,7 @@ import {
   negateCommit,
   isIdentity as commitIsIdentity,
   SUBORDER,
-} from "@openjanus/commitment";
+} from "./commitment/index.js";
 
 export { CURVE_P } from "../types/commitment";
 
@@ -44,7 +44,7 @@ export const BABYJUB_EVM_ADDRESS = "0xD79C90b797949F0956d977989aEf82A81c860e0C";
 export const FLOW_TESTNET_ACCESS_NODE = "https://rest-testnet.onflow.org";
 
 /** BabyJub subgroup order (2-gen blinding scalars live in [0, SUBORDER)) */
-export { SUBORDER as BABYJUB_SUBGROUP_ORDER } from "@openjanus/commitment";
+export { SUBORDER as BABYJUB_SUBGROUP_ORDER } from "./commitment/index.js";
 
 // ---------------------------------------------------------------------------
 // Core: Pedersen commitment (2-gen: C = [v]·G + [r]·H)

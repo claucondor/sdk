@@ -12,7 +12,7 @@
  * @module @claucondor/sdk/utils
  */
 
-import { SUBORDER } from "@openjanus/commitment";
+import { SUBORDER } from "../primitives/commitment/index.js";
 
 // Re-export so callers don't need to import from @openjanus/commitment directly
 export { SUBORDER as BABYJUB_SUBORDER };
