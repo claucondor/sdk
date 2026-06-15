@@ -11,7 +11,7 @@
  */
 
 import type { CommitmentXY } from "../types/commitment";
-import { SUBORDER } from "@openjanus/commitment";
+import { SUBORDER } from "../primitives/commitment/index.js";
 import {
   computeCommitment,
   addCommitmentsLocal,
