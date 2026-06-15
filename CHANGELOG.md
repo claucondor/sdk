@@ -2,6 +2,22 @@
 
 ---
 
+## 0.8.3 (2026-06-15)
+
+Internal: Pedersen commitment primitive (`commit`, `addCommits`, `subCommits`, `negateCommit`, `isIdentity`, `pointsEqual`, generators `G`/`H`, `SUBORDER`) is now inlined inside the SDK as `src/primitives/commitment/`. The external `@openjanus/commitment` dependency was removed — consumers no longer need to provide it as a tarball or transitive dep.
+
+### Changed
+
+- Dropped runtime dependency on `@openjanus/commitment`.
+- `src/primitives/commitment/*` now contains the commitment primitive directly (4 files moved from `openjanus-primitives/packages/commitment/src`).
+- The `Pedersen2Gen.sol` / `Pedersen2GenBabyJub.cdc` contract artifacts moved to `openjanus-contracts/packages/primitives/commitment/` — they were never shipped by the SDK, only the TypeScript was.
+
+### Migration
+
+- If you were installing `@openjanus/commitment` alongside `@claucondor/sdk@0.8.2` (because npm install failed without it), you can drop that dep on `0.8.3`: `npm install @claucondor/sdk@^0.8.3` is enough.
+
+---
+
 ## 0.8.2 (2026-06-15)
 
 Production release of the v0.8.x line — all alpha learnings consolidated. First public-facing demo on testnet using this SDK is live at https://privatetip.vercel.app.
