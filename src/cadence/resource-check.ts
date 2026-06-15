@@ -91,12 +91,14 @@ export async function checkJanusResourcesStatus(
   const shieldedInbox = (raw["shieldedInbox"] ?? "unknown") as ResourceStatus;
   const shieldedCheckpoint = (raw["shieldedCheckpoint"] ?? "unknown") as ResourceStatus;
 
+  // Treat both "outdated" (wrong deployer) and "missing" (never installed) as needing install.
+  const needsAction = (s: ResourceStatus) => s === "outdated" || s === "missing";
   const anyOutdated =
-    mockFTVault === "outdated" ||
-    janusFTRegistry === "outdated" ||
-    memoKey === "outdated" ||
-    shieldedInbox === "outdated" ||
-    shieldedCheckpoint === "outdated";
+    needsAction(mockFTVault) ||
+    needsAction(janusFTRegistry) ||
+    needsAction(memoKey) ||
+    needsAction(shieldedInbox) ||
+    needsAction(shieldedCheckpoint);
 
   return {
     mockFTVault,
