@@ -3,12 +3,17 @@
  *
  * Wraps snarkjs with:
  *   - Automatic pi_b Fp2 swap (EIP-197 encoding) — see utils/pi-b-swap.ts
- *   - On-chain verification via deployed ConfidentialTransferVerifier
+ *   - On-chain verification via deployed aggregate verifiers
  *   - Local verification via snarkjs (no network)
  *   - Typed public signal handling for the ConfidentialTransfer circuit
  *
- * Deployed verifier (v0.3):
- *   ConfidentialTransferVerifier.sol: 0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B (Flow EVM testnet)
+ * Deployed verifiers (v0.8, Flow EVM testnet):
+ *   ConfidentialTransferAggregateVerifier: 0x38e69fE7Ba7c2C586d64DFFc14742641A675666c
+ *   AmountDiscloseAggregateVerifier:       0xf7B634D41259D0613345633eE1CD193A030A6329
+ *
+ * Note: JanusFT uses different verifier addresses (v0.7 contracts embedded at deploy).
+ * Each adapter holds its own verifier constant. groth16.ts provides utility functions
+ * and defaults to the v0.8 ConfidentialTransfer verifier for verifyOnChain().
  */
 
 import type {
@@ -29,11 +34,26 @@ export type {
 };
 
 // ---------------------------------------------------------------------------
-// Deployed addresses
+// Deployed addresses (v0.8 testnet)
 // ---------------------------------------------------------------------------
 
-/** ConfidentialTransferVerifier.sol on Flow EVM testnet (v0.3) */
-export const VERIFIER_ADDRESS = "0x84852aF72D2EF2A0A937e8Dae0BFA482E707E39B";
+/**
+ * ConfidentialTransferAggregateVerifier — verifies shieldedTransfer proofs.
+ * Used by JanusFlow and JanusERC20. Default for verifyOnChain().
+ */
+export const CONFIDENTIAL_TRANSFER_VERIFIER_ADDRESS = "0x38e69fE7Ba7c2C586d64DFFc14742641A675666c";
+
+/**
+ * AmountDiscloseAggregateVerifier — verifies wrap/unwrap proofs.
+ * Used by JanusFlow and JanusERC20.
+ */
+export const AMOUNT_DISCLOSE_VERIFIER_ADDRESS = "0xf7B634D41259D0613345633eE1CD193A030A6329";
+
+/**
+ * @deprecated Use CONFIDENTIAL_TRANSFER_VERIFIER_ADDRESS or AMOUNT_DISCLOSE_VERIFIER_ADDRESS.
+ * Kept as alias pointing to the CT verifier for backward compatibility.
+ */
+export const VERIFIER_ADDRESS = CONFIDENTIAL_TRANSFER_VERIFIER_ADDRESS;
 
 /** Flow EVM testnet RPC */
 export const FLOW_EVM_TESTNET_RPC = "https://testnet.evm.nodes.onflow.org";

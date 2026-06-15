@@ -1,8 +1,15 @@
 /**
- * types.ts — Shared types for @claucondor/sdk v0.6.0
+ * types.ts — Shared types for @claucondor/sdk v0.8
  *
- * Single file for all cross-module type exports. Each major section is
- * self-explanatory. Keep this file free of runtime code — types only.
+ * Single file for all cross-module type exports.
+ * Keep this file free of runtime code — types only.
+ *
+ * v0.8 changes from v0.7:
+ *   - NoteContent: removed tipId (app-specific, not protocol)
+ *   - DepositRecord: added depositor field (from ShieldedInbox.Note)
+ *   - SnapshotContent: stripped to minimal {balance, blinding} — checkpoint
+ *     is opaque bytes per ShieldedCheckpoint design; v3 scan-era fields dropped
+ *   - SendResult: added checkpointPayload for caller to compose ShieldedCheckpoint.update()
  */
 
 // ---------------------------------------------------------------------------
@@ -48,45 +55,97 @@ export interface CadenceFTTokenEntry {
 export type TokenRegistryEntry = NativeTokenEntry | ERC20TokenEntry | CadenceFTTokenEntry;
 
 // ---------------------------------------------------------------------------
-// Snapshot schema (self-directed encrypted state blob)
+// Snapshot schema — minimal v0.8 checkpoint payload
 // ---------------------------------------------------------------------------
 
 /**
- * SNAPSHOT_TIMESTAMP_UNIT is always 'ms' (milliseconds since epoch).
- * This constant is exported so every layer that reads/writes timestamps
- * can import a single authoritative source — the v0.5.6 bug was a unit
- * mismatch between scanner (seconds) and reconstructor (milliseconds).
+ * Minimal checkpoint content for ShieldedCheckpoint.update().
+ * The checkpoint stores opaque bytes — this is the SDK-canonical schema.
+ * Apps that need additional metadata should encrypt it separately or
+ * extend the wire format in their own application layer.
  */
-export const SNAPSHOT_TIMESTAMP_UNIT = "ms" as const;
-
 export interface SnapshotContent {
   /** Hidden balance in native units (attoFLOW / raw ERC20 / UFix64 raw) */
   balance: bigint;
   /** Pedersen blinding factor */
   blinding: bigint;
-  /** Unix timestamp in MILLISECONDS when this snapshot was encrypted */
-  timestampMs: number;
-  // v3 additions — present only on shielded-transfer sender snapshots
-  /** Transfer amount sent (undefined on wrap/unwrap snapshots) */
-  txAmt?: bigint;
-  /** Recipient hint: Cadence address or COA EVM hex (undefined on wrap/unwrap snapshots) */
-  rcp?: string;
-  /** Plaintext memo attached to the transfer (undefined on wrap/unwrap snapshots) */
-  memo?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Note schema (sender-to-recipient encrypted amount+blinding)
 // ---------------------------------------------------------------------------
+
+/**
+ * Protocol-canonical note content — schema-agnostic ECIES payload.
+ * tipId and other app-specific fields are NOT part of the protocol.
+ * Apps building on top (e.g. PrivateTip) should encrypt their own payload
+ * using encryptText() and extend their schema locally.
+ */
 export interface NoteContent {
-  /** Amount transferred */
+  /** Amount transferred in native units */
   amount: bigint;
-  /** Per-transfer blinding factor */
+  /** Per-transfer Pedersen blinding factor */
   blinding: bigint;
-  /** Optional UTF-8 memo / app payload */
+  /** Optional UTF-8 memo string */
   memo?: string;
-  /** Optional tip identifier */
-  tipId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// ShieldedInbox note (from drainBatch / drainAll / peek)
+// ---------------------------------------------------------------------------
+
+/**
+ * A note from ShieldedInbox.drainBatch / drainAll.
+ * The `depositor` field identifies which token contract called deposit(),
+ * enabling multi-token disambiguation when decrypting inbox contents.
+ */
+export interface InboxNote {
+  /** ECIES-encrypted note payload (opaque bytes from the chain) */
+  ciphertext: Uint8Array;
+  /** Ephemeral pubkey X component used for ECIES encryption */
+  ephPubkeyX: bigint;
+  /** Ephemeral pubkey Y component used for ECIES encryption */
+  ephPubkeyY: bigint;
+  /**
+   * Address of the token contract that called deposit().
+   * Compare against TOKEN_REGISTRY entries to determine token type.
+   */
+  depositor: string;
+  /** EVM block number when the note was deposited */
+  blockNumber: bigint;
+}
+
+// ---------------------------------------------------------------------------
+// DepositRecord — raw encrypted deposit (kept for compatibility)
+// ---------------------------------------------------------------------------
+
+export interface DepositRecord {
+  /** Encrypted note payload */
+  ciphertext: Uint8Array;
+  /** Ephemeral pubkey used for encryption */
+  ephPubkey: { x: bigint; y: bigint };
+  /**
+   * Address of the token contract that deposited this note.
+   * Required for multi-token inbox disambiguation.
+   */
+  depositor: string;
+  /** EVM block number when deposited */
+  blockNumber: bigint;
+}
+
+// ---------------------------------------------------------------------------
+// Checkpoint payload (from shielded transfer, to be passed to ShieldedCheckpoint.update)
+// ---------------------------------------------------------------------------
+
+/**
+ * Encrypted checkpoint payload returned by orchestrateShieldedTransfer.
+ * Pass these three fields to ShieldedCheckpoint.update() — either as a
+ * separate EVM transaction or atomically via combined_shielded_transfer_with_checkpoint.cdc.
+ */
+export interface CheckpointPayload {
+  encryptedSnapshot: Uint8Array;
+  ephPubkeyX: bigint;
+  ephPubkeyY: bigint;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +178,16 @@ export interface SendParams {
 
 export interface SendResult {
   txHash: string;
+  /**
+   * Checkpoint payload for the sender. Call ShieldedCheckpoint.update() with these
+   * fields after the transfer to persist sender state.
+   * May be omitted if the adapter chose not to compute it (rare edge case).
+   */
+  checkpointPayload?: CheckpointPayload;
+  /** New sender balance after transfer (for local state update). */
+  newBalance?: bigint;
+  /** New sender blinding after transfer (for local state update). */
+  newBlinding?: bigint;
 }
 
 export interface UnwrapParams {
@@ -141,13 +210,9 @@ export interface TxResult {
   txHash: string;
 }
 
-export interface DepositRecord {
-  /** Encrypted note payload */
-  ciphertext: Uint8Array;
-  /** Ephemeral pubkey used for encryption */
-  ephPubkey: { x: bigint; y: bigint };
-  /** Unix timestamp in milliseconds */
-  timestampMs: number;
-  txHash: string;
-  blockNumber?: number;
-}
+// ---------------------------------------------------------------------------
+// Timestamp unit (kept for backward compat with any code that imports it)
+// ---------------------------------------------------------------------------
+
+/** @deprecated SnapshotContent no longer carries a timestamp in v0.8 */
+export const SNAPSHOT_TIMESTAMP_UNIT = "ms" as const;

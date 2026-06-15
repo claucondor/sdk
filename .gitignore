@@ -4,3 +4,5 @@ dist/
 lcov.info
 .DS_Store
 *.tgz
+# batch-claim artifacts: 151MB zkey exceeds GitHub 100MB limit — tracked by npm pack via package.json "files" field
+circuits/aggregate-claim-batch/

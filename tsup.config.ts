@@ -7,10 +7,17 @@ export default defineConfig({
     "network/index": "src/network/index.ts",
     "crypto/index": "src/crypto/index.ts",
     "utils/index": "src/utils/index.ts",
-    // v0.6 new modules
+    // v0.8 modules
     "adapters/index": "src/adapters/index.ts",
     "orchestration/index": "src/orchestration/index.ts",
-    "scan/index": "src/scan/index.ts",
+    "inbox/index": "src/inbox/index.ts",
+    "checkpoint/index": "src/checkpoint/index.ts",
+    "cadence/index": "src/cadence/index.ts",
+    // v0.8.1 modules
+    "batchClaim/index": "src/batchClaim/index.ts",
+    "proof/batch-claim": "src/proof/batch-claim.ts",
+    // v0.8-workarounds-promoted: browser-only session helpers
+    "session/index": "src/session/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,

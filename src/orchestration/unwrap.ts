@@ -8,6 +8,11 @@
  *   4. Encrypt residual snapshot to sender's memokey.
  *   5. Return all params.
  *
+ * v0.8.2 checkpoint note:
+ *   After the unwrap tx, call ShieldedCheckpoint.update(token, payload, cursor, signer).
+ *   `token` = TOKEN_REGISTRY[tokenId].proxy (e.g. JanusFlow proxy for FLOW).
+ *   Preferred: use cadenceTx.unwrapFlowAtomic(tokenAddrHex) for atomic single-tx unwrap+checkpoint.
+ *
  * Fee model:
  *   - claimedAmount is the FULL debit from the commitment.
  *   - netToRecipient = claimedAmount - fee.
@@ -124,10 +129,9 @@ export async function orchestrateUnwrapWithPrebuiltProofs(
   const fee = feeBps === 0 ? 0n : (claimedAmount * BigInt(feeBps)) / 10000n;
   const netToRecipient = claimedAmount - fee;
   const newBalance = currentBalance - claimedAmount;
-  const nowMs = Date.now();
 
   const snapshotEnc = await encryptSnapshot(
-    { balance: newBalance, blinding: newBlinding, timestampMs: nowMs },
+    { balance: newBalance, blinding: newBlinding },
     senderMemoKeypair.pubkey
   );
 
@@ -197,9 +201,8 @@ export async function orchestrateUnwrap(
   });
 
   // 6. Encrypt residual snapshot
-  const nowMs = Date.now();
   const snapshotEnc = await encryptSnapshot(
-    { balance: newBalance, blinding: newBlinding, timestampMs: nowMs },
+    { balance: newBalance, blinding: newBlinding },
     senderMemoKeypair.pubkey
   );
 

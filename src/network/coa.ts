@@ -28,7 +28,8 @@ export const KNOWN_COAS: Record<string, string> = {
   "0x3c601a443c81e6cd": "0x00000000000000000000000249065458581f9bf0", // Charlie
   "0xd32d9100e1fe983b": "0x0000000000000000000000027b94cfc8a64971cd", // Dave
   "0x374a28ddf00498e4": "0x0000000000000000000000027eb18dc34b9966fd", // Eve (placeholder)
-  "0xbef3c77681c15397": "0x0000000000000000000000022f6b30af48a94787", // openjanus-flow (UUPS proxy owner)
+  "0xbef3c77681c15397": "0x0000000000000000000000022f6b30af48a94787", // openjanus-flow (v0.7 admin)
+  "0x4b6bc58bc8bf5dcc": "0x0000000000000000000000020885d7ad3582356a", // v0.8 deployer (owner of all v0.8 proxies)
 };
 
 /**

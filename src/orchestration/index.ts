@@ -9,5 +9,6 @@ export type {
   ShieldedTransferOrchestrateResult,
   ShieldedTransferOrchestratePrebuiltInput,
 } from "./shielded-transfer";
+// v0.8: orchestrateShieldedTransfer returns txParams + checkpointPayload (split design)
 export { orchestrateUnwrap, orchestrateUnwrapWithPrebuiltProofs } from "./unwrap";
 export type { UnwrapOrchestrateInput, UnwrapOrchestrateResult, UnwrapOrchestratePrebuiltInput } from "./unwrap";

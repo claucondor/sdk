@@ -2,6 +2,148 @@
 
 ---
 
+## 0.8.1-alpha.7 (2026-06-11)
+
+Cadence ShieldedCheckpoint per-token deploy unblocked at 0xd1a02aa46d9151bb; MockFT no longer singleton
+
+### Changes
+
+- `CADENCE_SHIELDED_CHECKPOINT_ADDRESS` constant added (`0xd1a02aa46d9151bb`) — separate faucet account, per-token.
+- `cadence/transactions.ts`: `installCheckpoint` and `installInboxAndCheckpoint` now default to `CADENCE_SHIELDED_CHECKPOINT_ADDRESS` for the Cadence ShieldedCheckpoint import.
+- `cadence/atomic-transactions.ts`: removed stale singleton-blocked caveat comment.
+- `orchestration/unwrap.ts`: removed singleton overwrite warning comment.
+
+---
+
+## 0.8.1-alpha.6 (2026-06-11) — Multi-token ShieldedCheckpoint + atomic templates moved from frontend
+
+### Breaking Changes
+
+- **`ShieldedCheckpointClient.update()`**: signature changed from `update(payload, cursor, signer)` to `update(token, payload, cursor, signer)`. The `token` arg is the EVM proxy address of the Janus token being checkpointed (e.g. `TOKEN_REGISTRY.flow.proxy` for FLOW). Without it the call will fail.
+- **`ShieldedCheckpointClient.read()`**: was `read(signer)`, now `read(token, signer)`. Returns `null` instead of throwing when no checkpoint exists (`NoCheckpoint` revert is caught).
+- **`ShieldedCheckpointClient.readAndDecrypt()`**: was `readAndDecrypt(signer, memoPrivKey)`, now `readAndDecrypt(token, signer, memoPrivKey)`.
+- **`ShieldedCheckpointClient.metadata()`**: was `metadata(user)`, now `metadata(user, token)`.
+- **`ShieldedCheckpointClient.exists()`**: was `exists(user)`, now `exists(user, token)`.
+- **`ShieldedCheckpointClient.encryptAndUpdate()`**: was `encryptAndUpdate(snapshot, cursor, kp, signer)`, now `encryptAndUpdate(token, snapshot, cursor, kp, signer)`.
+- **`cadenceTx.updateCheckpointViaCoa()`**: ABI changed from `update(bytes,uint256,uint256,uint64)` to `update(address,bytes,uint256,uint256,uint64)`. The Cadence transaction now takes `tokenAddrHex: String` as its first arg.
+- **`cadenceTx.combinedShieldedTransferWithCheckpoint()`**: same ABI change — checkpoint call now includes token (resolved from `janusFlowAddr`). Also applies `EVM.EVMBytes(value:)` fix to `encryptedNoteTo` calldata.
+
+### New Contract Address
+
+- **`SHIELDED_CHECKPOINT_ADDRESS`**: updated to `0x88C9fD443BC15d1Cd24bc724DB6928D3246b2E26` (v0.8.2 multi-token re-deploy, sprint A.4).
+- Old singleton address `0xbF8dbE133FC1319570dBe43E32BFD9a6D64E1E76` preserved as internal `SHIELDED_CHECKPOINT_ADDRESS_ARCHIVE_SINGLETON` (NOT exported).
+
+### Atomic Templates Moved from PrivateTip Frontend
+
+Five Cadence transaction templates moved from `private-tip-v1/web/lib/cadence-tx.ts` into `src/cadence/atomic-transactions.ts`:
+
+- `cadenceTx.wrapFlowAtomic(tokenAddrHex)` — wrap + checkpoint in one tx
+- `cadenceTx.sendTipAtomic(tokenAddrHex)` — shieldedTransfer + checkpoint in one tx
+- `cadenceTx.unwrapFlowAtomic(tokenAddrHex)` — unwrap + checkpoint in one tx
+- `cadenceTx.claimBatchAtomic(tokenAddrHex)` — drainAll + claimBatch + checkpoint in one tx
+- `cadenceTx.atomicUpdateCheckpointViaCoa()` — standalone checkpoint update (atomic variant)
+
+All templates:
+- Use `EVM.EVMBytes(value: ...)` wrapper for `[UInt8] → bytes` calldata (fixes encoding bug hit in PrivateTip frontend).
+- Bake in `SHIELDED_CHECKPOINT_ADDRESS` from SDK constant (auto-updates when SDK is bumped).
+- Take `tokenAddrHex` as a JS function argument to parameterize the checkpoint token slot.
+
+### Orchestration Notes
+
+- `orchestrateWrap`, `orchestrateShieldedTransfer`, `orchestrateUnwrap` are unchanged — they return `checkpointPayload` for callers to persist.
+- Callers must now pass the token address when calling `checkpoint.update(token, payload, cursor, signer)`.
+- Token resolution: `TOKEN_REGISTRY.flow.proxy` for FLOW, `TOKEN_REGISTRY.mockusdc.proxy` for mUSDC.
+
+### MockFT (Cadence FT) Limitation
+
+The Cadence-side `ShieldedCheckpoint` upgrade was blocked in v0.8.2 sprint A.4. MockFT shielded balance is still subject to singleton overwrite on the Cadence side. The EVM checkpoint works correctly for all EVM tokens. Cadence FT checkpoint fix is deferred to a future sprint.
+
+---
+
+## 0.8.1-alpha.2 — 2026-06-10
+
+### Fixed
+
+- Backported runtime fixes from Phase C testnet: `__filename` TDZ in CJS bundle (`dist/index.cjs`, `dist/batchClaim/index.cjs`), robust `PACKAGE_ROOT` artifact resolution via `package.json` walk-up.
+- Source-level fix in `src/proof/batch-claim.ts`, `src/crypto/shielded-transfer.ts`, `src/crypto/amount-disclose.ts`; tarball now correct on fresh install (no `node_modules` patching needed).
+
+---
+
+## 0.8.1-alpha.1 — 2026-06-09
+
+### Added
+
+- **`BatchClaimClient`** (`src/batchClaim/BatchClaimClient.ts`): EVM client for `JanusToken.claimBatch`. Aggregates up to 50 ShieldedInbox notes into the caller's shielded balance via a single Groth16 proof. Exports `claimBatch(publicInputs, proof)` for pre-built proofs and `buildAndClaim(params)` for the full generate+submit flow. Also exposes `getVerifierAddress()` and `getVersion()` view helpers.
+- **`buildBatchClaimProof`** (`src/proof/batch-claim.ts`): TypeScript port of the `proof-inputs.cjs` accumulation strategy. Pads note arrays to N=50, computes C_old/C_new/C_consumed via chained BabyJubJub point addition (NOT scalar sum), runs `groth16.fullProve`, applies Fp2 swap, and returns EVM-ready `uint256[8]` proof + 6-element public inputs.
+- **`batchClaimAndUpdate`** methods on all three token adapters:
+  - `JanusFlowAdapter.batchClaimAndUpdate(params, signer)` → delegates to `BatchClaimClient.buildAndClaim`.
+  - `JanusERC20Adapter.batchClaimAndUpdate(params, signer)` → delegates to `BatchClaimClient.buildAndClaim`.
+  - `JanusFTAdapter.batchClaimAndUpdate(params)` → generates proof off-chain, submits via FCL Cadence tx calling `JanusFT.CommitmentRegistry.claimBatch()` with cross-VM verification.
+- 26 new unit tests (2 new test files) covering: C_old/C_new/C_consumed commitment arithmetic, note padding to N=50, pB Fp2 swap, public signal count validation, claimBatch calldata encoding, input validation, contract method delegation.
+
+### Protocol Notes
+
+- v0.8.1 contracts were upgraded via UUPS (proxies unchanged, impls swapped) — no SDK address changes needed. JanusFlow proxy remains `0xA64340C1d356835A2450306Ffd290Ed52c001Ad3`, JanusERC20 proxy remains `0xFD8F82bE1782AF1F85f4673065e94fb3F8D5387d`.
+- `ConfidentialClaimBatchVerifier` (pot22 ceremony, N=50): `0x2FBf6baef1D70f5A9aFF2602c934Bd62dcf6Df80`.
+- Trust assumption (testnet): inbox notes are NOT marked consumed on-chain after `claimBatch`. Replay is bounded by the C_old state machine — post-claim C_old advances to C_new, invalidating any proof that references the prior C_old. Mainnet hardening requires `NoteCommitmentTracker.sol` (deferred to L6/mainnet prep).
+
+---
+
+## 0.8.0-alpha.1 — 2026-06-09
+
+**v0.8 protocol rewrite: inbox/checkpoint replace scan, 6-arg shieldedTransfer, schema-agnostic ECIES.**
+
+### Breaking Changes
+
+- **`shieldedTransfer` ABI**: 9 args → 6 args. `encryptedSnapshotFrom`, `ephPubFromX`, `ephPubFromY` removed from calldata. The sender's checkpoint payload is returned by the SDK and must be submitted separately via `ShieldedCheckpoint.update()`.
+- **`scan/` module removed**. Use `ShieldedInboxClient.drainAndDecrypt()` for incoming note discovery. Use `ShieldedCheckpointClient.readAndDecrypt()` for balance recovery.
+- **`SnapshotContent`**: `timestampMs` field removed. Shape is now `{balance: bigint, blinding: bigint}` only.
+- **`NoteContent`**: `tipId` field removed (was app-specific, not protocol). Apps must carry it externally.
+- **`SendResult`**: now returns `checkpointPayload`, `newBalance`, `newBlinding`.
+
+### New Modules
+
+- **`src/inbox/ShieldedInboxClient`**: EVM client for `ShieldedInbox.sol`. Methods: `count`, `peek`, `peekAll`, `drainAll`, `drainBatch`, `drainAndDecrypt`, `deposit`.
+- **`src/checkpoint/ShieldedCheckpointClient`**: EVM client for `ShieldedCheckpoint.sol`. Methods: `exists`, `metadata`, `read`, `readAndDecrypt`, `update`, `encryptAndUpdate`.
+- **`src/cadence/transactions`**: Cadence transaction templates — `installInbox`, `installCheckpoint`, `installInboxAndCheckpoint`, `updateCheckpointViaCoa`, `combinedShieldedTransferWithCheckpoint`.
+
+### Crypto
+
+- **`src/crypto/note-helpers.ts`** (new): Protocol-canonical note encryption. Wire format: `{v:1, amt, bld, memo?}`.
+- **`src/crypto/checkpoint-schema.ts`** (new): Protocol-canonical snapshot encryption. Wire format: `{v:1, bal, bld}`.
+- `src/crypto/note-schema.ts` and `snapshot-schema.ts` now re-export from the new canonical files (backward-compat shims).
+- `decryptAnyNote`: dropped legacy `{v,a,b,d}` shielded fallback (JanusFT v0.8 now uses canonical format).
+- Added `decryptInboxNote(note: InboxNote, privkey: bigint)` convenience function.
+
+### Network
+
+- All Janus Cadence contracts moved to `0x4b6bc58bc8bf5dcc` (was `0xc4e8f99915893a2f`).
+- `SHIELDED_INBOX_ADDRESS = "0x0C787AAcbA9a116EdA4ec05Be41D8474D470bfC6"` (new).
+- `SHIELDED_CHECKPOINT_ADDRESS = "0xbF8dbE133FC1319570dBe43E32BFD9a6D64E1E76"` (new).
+- `MEMO_REGISTRY_ADDRESS = "0x361bD4d037838A3a9c5408AE465d36077800ee6c"` (was `0x05D104...`).
+- `LEGACY_V071_JANUSFLOW_PROXY` preserved for PrivateTip demo reference.
+- v0.8 `VERIFIERS`: `transferVerifier = 0x38e69fE7…`, `amountDiscloseVerifier = 0xf7B634…`.
+
+### Tests
+
+- 72 unit tests across 8 test files (all passing).
+- Covers: fee-math, note-helpers, checkpoint-schema, decrypt-any-note, pi-b-swap, contract addresses, COA registry, Cadence templates.
+- Added comprehensive integration tests against deployed v0.8 testnet stack (32 tests, 5 suites).
+  - `ShieldedInboxClient`: count, peek, drainBatch, drainAndDecrypt — wrap → transfer → drain full cycle.
+  - `ShieldedCheckpointClient`: encryptAndUpdate, readAndDecrypt, metadata, cursor rewind, SnapshotTooLarge revert.
+  - `MemoKeyRegistry`: publishMemoKey, getMemoKey, rotateMemoKey via `JanusFlowAdapter`.
+  - `JanusFlowAdapter`: full wrap → shieldedTransfer → checkpoint → drain → unwrap using SDK orchestration layer.
+  - `JanusERC20Adapter`: mint → approve → wrap → transfer → drain → decode → unwrap for MockUSDC.
+  - Gated by `RUN_INTEGRATION=1` to avoid blocking default `npm test`.
+- Added E2E tests via SDK public API only (16 tests, 3 suites).
+  - `flow-lifecycle`: FLOW wrap → blinding recovery from `WrapWithSnapshot` event → shieldedTransfer → drain → unwrap.
+  - `musdc-lifecycle`: mUSDC mint → approve → wrap → shieldedTransfer → drain → unwrap.
+  - `multi-token`: same sender wraps FLOW + mUSDC; sends FLOW to Bob, mUSDC to Carol; isolated inboxes verified.
+  - Gated by `RUN_E2E=1`.
+- Confirmed compatible with testnet v0.8 stack at Cadence account `0x4b6bc58bc8bf5dcc`.
+
+---
+
 ## 0.7.5 — 2026-06-08
 
 **Decrypt API consistency (OF-7), reverse-scan recovery, and rate-limit fix.**
