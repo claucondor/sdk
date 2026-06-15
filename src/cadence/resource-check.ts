@@ -4,10 +4,9 @@
  * Checks which Janus Cadence resources are present and whether they are
  * up-to-date (i.e., from the current deployer address).
  *
- * For resources that have a public capability we can determine whether the cap
- * resolves to the currently-deployed contract type.  For JanusFT.CommitmentRegistry
- * there is NO public capability, so we infer its status from MockFT.Vault
- * (both live under the same deployer and are reinstalled together).
+ * Uses account.storage.type(at:) directly for each resource so that
+ * MockFT.Vault, JanusFT.CommitmentRegistry, and JanusFlow.MemoKey are each
+ * checked independently — no inference across resources.
  */
 
 export type ResourceStatus = "ok" | "outdated" | "missing" | "unknown";
@@ -22,55 +21,41 @@ export interface ResourcesStatus {
 }
 
 // ---------------------------------------------------------------------------
-// Cadence script — checks resources that have a public capability
+// Cadence script — checks resources via storage.type(at:) for each resource
 // ---------------------------------------------------------------------------
 const RESOURCE_CHECK_SCRIPT = `
 import MockFT from 0x4b6bc58bc8bf5dcc
+import JanusFT from 0x4b6bc58bc8bf5dcc
 import JanusFlow from 0x5dcbeb41055ec57e
-import ShieldedInbox from 0x4b6bc58bc8bf5dcc
-import ShieldedCheckpoint from 0xd1a02aa46d9151bb
 import FungibleToken from 0x9a0766d93b6608b7
 
 access(all) fun main(addr: Address): {String: String} {
   let account = getAccount(addr)
   var result: {String: String} = {}
 
-  // MockFT vault — check if concrete-typed cap exists vs generic receiver only
-  let mockVaultCap = account.capabilities.get<&MockFT.Vault>(/public/mockFTReceiver)
-  let mockRecvCap  = account.capabilities.get<&{FungibleToken.Receiver}>(/public/mockFTReceiver)
-  if !mockRecvCap.check() && !mockVaultCap.check() {
-    result["mockFTVault"] = "missing"
-  } else if mockRecvCap.check() && !mockVaultCap.check() {
-    result["mockFTVault"] = "outdated"
-  } else if mockVaultCap.check() {
-    result["mockFTVault"] = "ok"
-  } else {
-    result["mockFTVault"] = "unknown"
-  }
+  // === MockFT.Vault ===
+  let mockExpected = Type<@MockFT.Vault>()
+  let mockStored = account.storage.type(at: /storage/mockFTVault)
+  if mockStored == nil { result["mockFTVault"] = "missing" }
+  else if mockStored! != mockExpected { result["mockFTVault"] = "outdated" }
+  else { result["mockFTVault"] = "ok" }
 
-  // MemoKey — public cap exists?
-  let memoKeyCap = account.capabilities.get<&{JanusFlow.MemoKeyPublic}>(/public/openjanusMemoKey)
-  if !memoKeyCap.check() {
-    result["memoKey"] = "missing"
-  } else {
-    result["memoKey"] = "ok"
-  }
+  // === JanusFT.CommitmentRegistry ===
+  let regExpected = Type<@JanusFT.CommitmentRegistry>()
+  let regStored = account.storage.type(at: /storage/janusFTRegistry)
+  if regStored == nil { result["janusFTRegistry"] = "missing" }
+  else if regStored! != regExpected { result["janusFTRegistry"] = "outdated" }
+  else { result["janusFTRegistry"] = "ok" }
 
-  // ShieldedInbox — public cap exists?
-  let inboxCap = account.capabilities.get<&{ShieldedInbox.Receiver}>(/public/shieldedInbox)
-  if !inboxCap.check() {
-    result["shieldedInbox"] = "missing"
-  } else {
-    result["shieldedInbox"] = "ok"
-  }
+  // === JanusFlow.MemoKey ===
+  let memoExpected = Type<@JanusFlow.MemoKey>()
+  let memoStored = account.storage.type(at: /storage/openjanusMemoKey)
+  if memoStored == nil { result["memoKey"] = "missing" }
+  else if memoStored! != memoExpected { result["memoKey"] = "outdated" }
+  else { result["memoKey"] = "ok" }
 
-  // ShieldedCheckpoint — public cap exists?
-  let cpCap = account.capabilities.get<&{ShieldedCheckpoint.Metadata}>(/public/shieldedCheckpoint)
-  if !cpCap.check() {
-    result["shieldedCheckpoint"] = "missing"
-  } else {
-    result["shieldedCheckpoint"] = "ok"
-  }
+  result["shieldedInbox"] = "unknown"
+  result["shieldedCheckpoint"] = "unknown"
 
   return result
 }
@@ -84,9 +69,9 @@ access(all) fun main(addr: Address): {String: String} {
  * Queries the Flow network and returns the status of each Janus Cadence
  * resource for the given address.
  *
- * Note: JanusFT.CommitmentRegistry has no public capability so its status is
- * inferred: if MockFT.Vault is "outdated" (same deployer change) the registry
- * is also treated as "outdated"; otherwise it is "unknown".
+ * Each resource is checked independently via storage.type(at:) — no inference
+ * across resources. JanusFT.CommitmentRegistry, MockFT.Vault, and
+ * JanusFlow.MemoKey are all directly inspected.
  */
 export async function checkJanusResourcesStatus(
   cadenceAddress: string,
@@ -101,13 +86,10 @@ export async function checkJanusResourcesStatus(
   })) as Record<string, string>;
 
   const mockFTVault = (raw["mockFTVault"] ?? "unknown") as ResourceStatus;
+  const janusFTRegistry = (raw["janusFTRegistry"] ?? "unknown") as ResourceStatus;
   const memoKey = (raw["memoKey"] ?? "unknown") as ResourceStatus;
   const shieldedInbox = (raw["shieldedInbox"] ?? "unknown") as ResourceStatus;
   const shieldedCheckpoint = (raw["shieldedCheckpoint"] ?? "unknown") as ResourceStatus;
-
-  // janusFTRegistry: inferred from mockFTVault (same deployer, same deployer change)
-  const janusFTRegistry: ResourceStatus =
-    mockFTVault === "outdated" ? "outdated" : "unknown";
 
   const anyOutdated =
     mockFTVault === "outdated" ||
