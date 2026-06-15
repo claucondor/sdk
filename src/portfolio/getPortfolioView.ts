@@ -365,17 +365,24 @@ export async function getPortfolioView(
     } else if (opts.cadenceAddress) {
       // ── Cadence inbox path (MockFT / cadence-ft tokens) ─────────────────
       // JanusFT.shieldedTransfer writes to the recipient's Cadence ShieldedInbox,
-      // NOT the EVM ShieldedInbox. The inbox head pointer on-chain tracks what
-      // has been drained; peek() returns only UNREAD (pending) notes — no
-      // external cursor is needed here (unlike the EVM inbox cursor model).
+      // NOT the EVM ShieldedInbox. NOTE: JanusFT.claimBatch does NOT advance the
+      // Cadence inbox head pointer — notes stay physically in the inbox after claim.
+      // The EVM ShieldedCheckpoint's lastConsumedNoteIndex is the sole replay
+      // barrier. We apply the same cursor filter here as in the EVM inbox path.
       try {
         const cadenceNotes = await getCadenceInboxNotes(opts.cadenceAddress, {
           flowAccessNode: opts.flowAccessNode ?? FLOW_CADENCE_ACCESS,
           inboxContractAddress: opts.cadenceInboxContractAddress ?? CADENCE_DEPLOYER_ADDRESS,
         });
 
-        for (let i = 0; i < cadenceNotes.length; i++) {
-          const note = cadenceNotes[i];
+        // Filter by cursor: notes at index < lastConsumedNoteIndex were already
+        // absorbed by claimBatch and must not be double-counted as pending.
+        const pendingCadenceNotes = cadenceNotes.filter(
+          (note) => BigInt(note.index) >= lastConsumedNoteIndex,
+        );
+
+        for (let i = 0; i < pendingCadenceNotes.length; i++) {
+          const note = pendingCadenceNotes[i];
           try {
             const content = await decryptNote(
               note.ciphertext,
