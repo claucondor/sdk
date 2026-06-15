@@ -1016,7 +1016,9 @@ transaction(
 
   execute {
     // 1. JanusFT.claimBatch — aggregate inbox notes into commitment
-    self.registryRef.claimBatch(
+    // claimBatch is a CONTRACT-level fn, not a registry method. The registryRef
+    // prepare/borrow exists to ensure the signer has the registry installed.
+    JanusFT.claimBatch(
       account:      account,
       publicInputs: publicInputs,
       proof:        proof,
